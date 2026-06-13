@@ -10,6 +10,11 @@
     "ingest": "node scripts/ingest.mjs",
     "db:schema": "psql -h localhost -p 5432 -U postgres -d datjf_portal -f server/sql/schema.sql",
     "db:seed": "psql -h localhost -p 5432 -U postgres -d datjf_portal -f supabase/seed.sql",
+    "db:accounts": "node scripts/seed-accounts.mjs",
+    "db:feedback": "node scripts/draft-feedback.mjs",
+    "cloud:schema": "psql \"$DATABASE_URL\" -f server/sql/schema.sql",
+    "cloud:seed": "psql \"$DATABASE_URL\" -f supabase/seed.sql",
+    "cloud:push": "npm run cloud:schema && npm run cloud:seed && npm run db:accounts && npm run db:feedback",
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview"

@@ -242,5 +242,11 @@ app.patch('/api/admin/candidates/:slug', admin, async (req, res) => {
   res.json({ ok: true })
 })
 
-const PORT = Number(process.env.PORT || 8787)
-app.listen(PORT, () => console.log(`▶ DATJF portal API on http://localhost:${PORT}  (SMTP: ${smtpConfigured ? 'on' : 'off'})`))
+// Local dev: run a persistent server. On Vercel (serverless) we export `app`
+// instead and never call listen.
+if (!process.env.VERCEL) {
+  const PORT = Number(process.env.PORT || 8787)
+  app.listen(PORT, () => console.log(`▶ DATJF portal API on http://localhost:${PORT}  (SMTP: ${smtpConfigured ? 'on' : 'off'})`))
+}
+
+export default app
