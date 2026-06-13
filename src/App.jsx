@@ -78,6 +78,11 @@ const App = () => {
       return
     }
 
+    if (!supabase) {
+      toast.error('Registration is temporarily unavailable. Please try again later.')
+      return
+    }
+
     setLoading(true)
     try {
       const { error } = await supabase

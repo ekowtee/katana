@@ -5,6 +5,11 @@ export default defineConfig({
   plugins: [react()],
   server: {
     proxy: {
+      '/api': {
+        target: 'http://localhost:8787',
+        changeOrigin: true,
+        secure: false,
+      },
       '/api-proxy': {
         target: 'https://api.drboahemaantim.com/api',
         changeOrigin: true,
