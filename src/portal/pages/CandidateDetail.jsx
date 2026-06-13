@@ -67,7 +67,7 @@ export default function CandidateDetail() {
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr)', gap: '1.25rem', marginTop: '1.25rem' }} className="dash-grid">
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '1.25rem', marginTop: '1.25rem' }} className="dash-grid">
         {/* Score breakdown */}
         <div className="card card-pad">
           <span className="card-title">Score Breakdown</span>
@@ -118,6 +118,41 @@ export default function CandidateDetail() {
           {account?.role === 'admin' && (
             <Link to={`/portal/admin?candidate=${c.slug}`} className="btn-ghost btn-sm" style={{ marginTop: 16 }}>
               Curate candidate feedback →
+            </Link>
+          )}
+        </div>
+
+        {/* Curated Feedback (Visible to Candidate) */}
+        <div className="card card-pad">
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span className="card-title">Curated Feedback to Candidate</span>
+            <span className="tag" style={{ color: 'var(--color-gold)' }}>Candidate View</span>
+          </div>
+          <div style={{ display: 'grid', gap: 14, marginTop: 16 }}>
+            {d.feedback.length === 0 && <p style={{ fontSize: 12, color: 'var(--color-cream-muted)' }}>No curated feedback drafted yet.</p>}
+            {d.feedback.map((f, i) => {
+              const label = f.criterion_key ? (d.scores.find(s => s.criterion_key === f.criterion_key)?.label || f.criterion_key) : 'Overall Summary'
+              return (
+                <div key={i} style={{ borderLeft: '2px solid var(--color-gold-faint)', paddingLeft: 12 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 4 }}>
+                    <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-gold)' }}>{critShort(label)}</span>
+                    <span className={`chip ${f.approved ? 'chip-selected' : 'chip-review'}`}>
+                      <span className="dot" />
+                      {f.approved ? 'Published' : 'Draft'}
+                    </span>
+                  </div>
+                  {f.body ? (
+                    <p className="prose" style={{ fontSize: 12.5, marginTop: 4 }}>{f.body}</p>
+                  ) : (
+                    <p style={{ fontSize: 12.5, color: 'var(--color-cream-muted)', fontStyle: 'italic', marginTop: 4 }}>No feedback text entered.</p>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+          {account?.role === 'admin' && (
+            <Link to={`/portal/admin?candidate=${c.slug}`} className="btn-ghost btn-sm" style={{ marginTop: 16, display: 'inline-flex' }}>
+              Edit feedback in Admin tab →
             </Link>
           )}
         </div>

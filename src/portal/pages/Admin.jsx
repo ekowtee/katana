@@ -178,7 +178,24 @@ function FeedbackTab({ dash, reloadDash, initialSlug, onSelect, flash }) {
 
   return (
     <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,260px) minmax(0,1fr)', gap: '1.25rem' }} className="dash-grid">
-      <div className="card" style={{ alignSelf: 'start', maxHeight: '70vh', overflowY: 'auto' }}>
+      {/* Mobile-only Candidate Selector */}
+      <div className="md:hidden block">
+        <label>Select Candidate</label>
+        <select
+          value={slug}
+          onChange={(e) => { setSlug(e.target.value); onSelect(e.target.value) }}
+          style={{ width: '100%', marginBottom: '1rem' }}
+        >
+          {dash.candidates.map((c) => (
+            <option key={c.slug} value={c.slug} style={{ backgroundColor: 'var(--color-panel-green)' }}>
+              {c.rank ? `${c.rank}. ` : ''}{c.name} ({c.status})
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {/* Desktop-only Candidate Sidebar */}
+      <div className="card hidden md:block" style={{ alignSelf: 'start', maxHeight: '70vh', overflowY: 'auto' }}>
         <div className="card-pad card-hairline"><span className="card-title">Candidates</span></div>
         {dash.candidates.map((c) => (
           <button key={c.slug} onClick={() => { setSlug(c.slug); onSelect(c.slug) }}
