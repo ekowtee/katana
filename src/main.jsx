@@ -20,8 +20,11 @@ createRoot(document.getElementById('root')).render(
     <BrowserRouter>
       <AuthProvider>
         <Routes>
-          {/* Public launch landing — untouched */}
-          <Route path="/" element={<App />} />
+          {/* Root → the panel portal (this domain is the selection portal). */}
+          <Route path="/" element={<Navigate to="/portal" replace />} />
+
+          {/* Original launch-event RSVP landing, kept available here. */}
+          <Route path="/launch" element={<App />} />
 
           {/* Portal */}
           <Route path="/portal/login" element={<Login />} />
@@ -39,7 +42,7 @@ createRoot(document.getElementById('root')).render(
             <Route index element={<MyResults />} />
           </Route>
 
-          <Route path="*" element={<Navigate to="/" replace />} />
+          <Route path="*" element={<Navigate to="/portal" replace />} />
         </Routes>
       </AuthProvider>
     </BrowserRouter>
