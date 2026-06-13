@@ -33,7 +33,7 @@ export function Brand({ small }) {
     <div className="portal-brand">
       <img src={logo} alt="D.A. Twum Jnr. Fellowship" />
       {!small && (
-        <div>
+        <div className="hidden sm:block">
           <div className="pb-title">D.A. Twum Jnr. Fellowship</div>
           <div className="pb-sub">Selection Portal</div>
         </div>

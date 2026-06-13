@@ -89,11 +89,13 @@ function AccessTab({ overview, reload, flash }) {
             )}
           </div>
           {adding === role && (
-            <div className="card-pad card-hairline" style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr auto auto', gap: 8, alignItems: 'end' }}>
+            <div className="card-pad card-hairline grid grid-cols-1 sm:grid-cols-[1.4fr_1fr_auto_auto] gap-3 items-end">
               <div><label>Email</label><input value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} placeholder="name@email.com" /></div>
               <div><label>Display name</label><input value={form.displayName} onChange={(e) => setForm({ ...form, displayName: e.target.value })} placeholder="Full name" /></div>
-              <button className="btn-gold btn-sm" onClick={create}><Check size={14} /></button>
-              <button className="btn-ghost btn-sm" onClick={() => setAdding(false)}>Cancel</button>
+              <div className="flex gap-2 sm:contents">
+                <button className="btn-gold btn-sm flex-1 sm:flex-none" onClick={create}><Check size={14} /></button>
+                <button className="btn-ghost btn-sm flex-1 sm:flex-none" onClick={() => setAdding(false)}>Cancel</button>
+              </div>
             </div>
           )}
           <div style={{ overflowX: 'auto' }}>

@@ -55,9 +55,9 @@ export function magicLinkEmail({ name, link, role }) {
 const REPLY_TO = process.env.SMTP_REPLY_TO || process.env.SMTP_FROM
 
 export async function sendMagicLink({ to, name, link, role }) {
+  console.log(`\n[mailer] Access link generated for ${to}:\n${link}\n`)
   const msg = magicLinkEmail({ name, link, role })
   if (!transporter) {
-    console.log(`\n[mailer] SMTP not configured — magic link for ${to}:\n${link}\n`)
     return { delivered: false, reason: 'smtp_not_configured' }
   }
   try {

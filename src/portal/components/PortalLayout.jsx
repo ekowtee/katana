@@ -20,27 +20,32 @@ export default function PortalLayout({ roles }) {
 
   return (
     <div className="portal-root">
-      <nav className="portal-nav">
+      <nav className="portal-nav px-3 py-2.5 sm:px-6 md:px-8 gap-2 sm:gap-6">
         <Brand />
-        <div className="portal-navlinks">
+        <div className="portal-navlinks gap-1 sm:gap-2">
           {isStaff && (
-            <NavLink to="/portal" end className={({ isActive }) => `portal-navlink ${isActive ? 'active' : ''}`}>
-              <LayoutDashboard size={13} style={{ marginRight: 5, verticalAlign: '-2px' }} />Dashboard
+            <NavLink to="/portal" end className={({ isActive }) => `portal-navlink flex items-center justify-center ${isActive ? 'active' : ''}`}>
+              <LayoutDashboard size={14} className="md:mr-1.5" />
+              <span className="hidden md:inline">Dashboard</span>
             </NavLink>
           )}
           {account.role === 'candidate' && (
-            <NavLink to="/portal/me" className={({ isActive }) => `portal-navlink ${isActive ? 'active' : ''}`}>
-              <FileText size={13} style={{ marginRight: 5, verticalAlign: '-2px' }} />My Feedback
+            <NavLink to="/portal/me" className={({ isActive }) => `portal-navlink flex items-center justify-center ${isActive ? 'active' : ''}`}>
+              <FileText size={14} className="md:mr-1.5" />
+              <span className="hidden md:inline">My Feedback</span>
             </NavLink>
           )}
           {account.role === 'admin' && (
-            <NavLink to="/portal/admin" className={({ isActive }) => `portal-navlink ${isActive ? 'active' : ''}`}>
-              <Shield size={13} style={{ marginRight: 5, verticalAlign: '-2px' }} />Admin
+            <NavLink to="/portal/admin" className={({ isActive }) => `portal-navlink flex items-center justify-center ${isActive ? 'active' : ''}`}>
+              <Shield size={14} className="md:mr-1.5" />
+              <span className="hidden md:inline">Admin</span>
             </NavLink>
           )}
-          <div style={{ width: 1, height: 20, background: 'var(--color-border-green)', margin: '0 0.5rem' }} />
-          <span className="tag" title={account.email}>{account.displayName || account.email}</span>
-          <button className="portal-navlink" onClick={doLogout} title="Sign out" style={{ color: 'var(--color-cream-muted)' }}>
+          <div className="hidden sm:block" style={{ width: 1, height: 20, background: 'var(--color-border-green)', margin: '0 0.25rem' }} />
+          <span className="tag hidden sm:inline-block max-w-[120px] truncate" title={account.email}>
+            {account.displayName || account.email}
+          </span>
+          <button className="portal-navlink flex items-center justify-center" onClick={doLogout} title="Sign out" style={{ color: 'var(--color-cream-muted)' }}>
             <LogOut size={14} />
           </button>
         </div>

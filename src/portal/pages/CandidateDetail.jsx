@@ -53,14 +53,14 @@ export default function CandidateDetail() {
           </div>
           <div style={{ display: 'grid', gap: 6, marginTop: '1.1rem', fontSize: 12.5, color: 'var(--color-cream-muted)' }}>
             {c.discipline && <Meta icon={<GraduationCap size={13} />}>{c.discipline}{c.institution ? ` · ${c.institution}` : ''}</Meta>}
-            {c.email && <Meta icon={<Mail size={13} />}><a href={`mailto:${c.email}`} style={{ color: 'inherit' }}>{c.email}</a></Meta>}
+            {c.email && <Meta icon={<Mail size={13} />}><a href={`mailto:${c.email}`} style={{ color: 'inherit' }} className="break-all">{c.email}</a></Meta>}
             {c.phone && <Meta icon={<Phone size={13} />}>{c.phone}</Meta>}
             {c.address && <Meta icon={<MapPin size={13} />}>{c.address}</Meta>}
           </div>
         </div>
-        <div style={{ textAlign: 'right' }}>
+        <div className="text-left sm:text-right mt-4 sm:mt-0">
           <div className="portal-eyebrow">Total Score</div>
-          <div style={{ fontFamily: 'Funnel Display, serif', fontSize: '2.8rem', lineHeight: 1, color: 'var(--color-gold)' }}>
+          <div style={{ fontFamily: 'Cormorant Garamond, serif', fontSize: '2.8rem', lineHeight: 1, color: 'var(--color-gold)', fontWeight: 600 }}>
             {c.total_50 != null ? Number(c.total_50).toFixed(1) : '—'}<span style={{ fontSize: '1rem', color: 'var(--color-cream-muted)' }}> / 50</span>
           </div>
           <div style={{ fontSize: 13, color: 'var(--color-cream-muted)', marginTop: 4 }}>{fmtPct(c.score_pct)} attainment</div>

@@ -81,7 +81,7 @@ export default function Dashboard() {
               </PieChart>
             </ResponsiveContainer>
             <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none' }}>
-              <div style={{ fontFamily: 'Funnel Display, serif', fontSize: '1.7rem', color: 'var(--color-cream)', lineHeight: 1 }}>{selectedCount}</div>
+              <div style={{ fontFamily: 'Cormorant Garamond, serif', fontSize: '2.1rem', color: 'var(--color-cream)', lineHeight: 1, fontWeight: 600 }}>{selectedCount}</div>
               <div style={{ fontSize: 8.5, letterSpacing: '0.18em', textTransform: 'uppercase', color: 'var(--color-cream-muted)', marginTop: 3 }}>Selected</div>
             </div>
           </div>
@@ -126,7 +126,7 @@ export default function Dashboard() {
           <div style={{ width: '100%', height: 200, marginTop: 10 }}>
             <ResponsiveContainer>
               <BarChart data={dist} margin={{ top: 6, right: 6, left: -22, bottom: 0 }}>
-                <XAxis dataKey="band" tick={{ fill: '#C8C2B4', fontSize: 10, fontFamily: 'Lexend' }} axisLine={{ stroke: '#264A35' }} tickLine={false} />
+                <XAxis dataKey="band" tick={{ fill: '#C8C2B4', fontSize: 10, fontFamily: 'Outfit' }} axisLine={{ stroke: '#264A35' }} tickLine={false} />
                 <YAxis allowDecimals={false} tick={{ fill: '#5d6b60', fontSize: 10 }} axisLine={false} tickLine={false} />
                 <Tooltip cursor={{ fill: 'rgba(201,168,76,0.06)' }} contentStyle={tipStyle} formatter={(v) => [`${v} candidate${v === 1 ? '' : 's'}`, 'Count']} />
                 <Bar dataKey="count" radius={[4, 4, 0, 0]} maxBarSize={46}>
@@ -150,8 +150,8 @@ export default function Dashboard() {
               <tr>
                 <th style={{ width: 56 }}>Rank</th>
                 <th>Candidate</th>
-                <th style={{ width: 150 }}>Score</th>
-                <th style={{ width: 150 }}>Status</th>
+                <th className="w-[80px] md:w-[150px]">Score</th>
+                <th className="w-[100px] md:w-[150px]">Status</th>
               </tr>
             </thead>
             <tbody>
@@ -194,7 +194,7 @@ function GroupBlock({ group, showCutoffBefore, onClick }) {
           <td>
             {c.score_pct != null ? (
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <div className="scorebar" style={{ flex: 1, maxWidth: 80 }}><span style={{ width: `${c.score_pct * 100}%` }} /></div>
+                <div className="scorebar hidden md:block" style={{ flex: 1, maxWidth: 80 }}><span style={{ width: `${c.score_pct * 100}%` }} /></div>
                 <span style={{ fontSize: 12, color: 'var(--color-gold)', minWidth: 50 }}>{Number(c.total_50).toFixed(1)} · {fmtPct(c.score_pct)}</span>
               </div>
             ) : <span style={{ color: 'var(--color-cream-muted)', fontSize: 12 }}>—</span>}

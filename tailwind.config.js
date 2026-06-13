@@ -21,11 +21,11 @@ export default {
         'dark-green': '#002b1b', // Legacy support
       },
       fontFamily: {
-        display: ['"Funnel Display"', 'serif'],
-        body: ['"Geologica"', 'sans-serif'],
-        ui: ['"Lexend"', 'sans-serif'],
+        display: ['"Cormorant Garamond"', 'serif'],
+        body: ['"Plus Jakarta Sans"', 'sans-serif'],
+        ui: ['"Outfit"', 'sans-serif'],
         handwriting: ['"Great Vibes"', 'cursive'],
-        serif: ['"Playfair Display"', 'serif'],
+        serif: ['"Cormorant Garamond"', 'serif'],
       },
       backgroundImage: {
         'custom-gradient': 'linear-gradient(94.06deg, #CE1919 -1.21%, #FF5252 58.66%, #FFA3A3 116.84%)',
