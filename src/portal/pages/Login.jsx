@@ -6,15 +6,24 @@ import { api } from '../lib/api'
 import { useAuth } from '../lib/AuthContext'
 import { Brand, Loader } from '../components/ui'
 
+// ?error=<code> set by the API when a sign-in redirect fails.
+const LINK_ERRORS = {
+  invalid: 'That link was invalid or has expired. Request a new one below.',
+  terranova: 'That sign-in from TerraNova did not work. Go back to TerraNova and open the app again, or sign in here.',
+  no_access: 'You do not have access to Katana yet. Ask its administrator to add you.',
+}
+
 export default function Login() {
   const { account, loading } = useAuth()
   const [params] = useSearchParams()
+  const code = params.get('error')
+  const linkError = Object.keys(LINK_ERRORS).includes(code) ? LINK_ERRORS[code] : ''
   const [email, setEmail] = useState('')
   const [sent, setSent] = useState(false)
   const [busy, setBusy] = useState(false)
-  const [error, setError] = useState(params.get('error') === 'invalid' ? 'That link was invalid or has expired. Request a new one below.' : '')
+  const [error, setError] = useState(linkError)
 
-  useEffect(() => { if (params.get('error') === 'invalid') setError('That link was invalid or has expired. Request a new one below.') }, [params])
+  useEffect(() => { if (linkError) setError(linkError) }, [linkError])
 
   if (loading) return <Loader label="Checking session" />
   if (account) return <Navigate to={account.role === 'candidate' ? '/portal/me' : '/portal'} replace />

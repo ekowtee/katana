@@ -116,6 +116,13 @@ create table if not exists login_tokens (
 );
 create index if not exists login_tokens_account_idx on login_tokens (account_id);
 
+-- TerraNova sign-in handoff: each token's jti is recorded until it expires so a
+-- token can only be used once (the primary key is the replay check).
+create table if not exists terranova_jti (
+  jti         text primary key,
+  expires_at  timestamptz not null
+);
+
 -- ── updated_at trigger ──────────────────────────────────────────────────────
 create or replace function touch_updated_at() returns trigger as $$
 begin new.updated_at = now(); return new; end; $$ language plpgsql;

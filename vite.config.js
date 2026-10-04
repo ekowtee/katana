@@ -10,6 +10,12 @@ export default defineConfig({
         changeOrigin: true,
         secure: false,
       },
+      // TerraNova sign-in handoff (POST /sso/terranova) is served by the API too.
+      '/sso': {
+        target: 'http://localhost:8787',
+        changeOrigin: true,
+        secure: false,
+      },
       '/api-proxy': {
         target: 'https://api.drboahemaantim.com/api',
         changeOrigin: true,

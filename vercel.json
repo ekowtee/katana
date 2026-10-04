@@ -5,6 +5,7 @@
   "framework": "vite",
   "rewrites": [
     { "source": "/api/(.*)", "destination": "/api" },
+    { "source": "/sso/terranova", "destination": "/api" },
     { "source": "/(.*)", "destination": "/index.html" }
   ]
 }

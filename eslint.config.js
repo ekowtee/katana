@@ -35,4 +35,9 @@ export default [
       ],
     },
   },
+  {
+    // Vercel Routing Middleware runs on the server, not in the browser.
+    files: ['middleware.js'],
+    languageOptions: { globals: globals.node },
+  },
 ]

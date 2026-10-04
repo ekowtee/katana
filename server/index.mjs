@@ -4,9 +4,10 @@ import 'dotenv/config'
 import { many, one } from './db.mjs'
 import {
   issueLoginToken, consumeLoginToken, setSession, clearSession,
-  currentAccount, requireAuth,
+  currentAccount, requireAuth, landingFor,
 } from './auth.mjs'
 import { sendMagicLink, smtpConfigured } from './mailer.mjs'
+import { terranovaSso } from './sso.mjs'
 
 const app = express()
 app.use(express.json())
@@ -16,7 +17,6 @@ const APP_URL = process.env.APP_URL || 'http://localhost:5173'
 // Link hits the API verify route (proxied under the SPA origin in dev), which
 // sets the session cookie and redirects into the portal.
 const linkFor = (token) => `${APP_URL}/api/auth/verify?token=${encodeURIComponent(token)}`
-const landingFor = (acc) => (acc.role === 'candidate' ? '/portal/me' : '/portal')
 
 // ════════════════════════════════════════════════════════════════════════
 //  AUTH
@@ -44,6 +44,9 @@ app.get('/api/auth/verify', async (req, res) => {
 })
 
 app.post('/api/auth/logout', (req, res) => { clearSession(res); res.json({ ok: true }) })
+
+// Staff arriving from TerraNova: POST /sso/terranova (see server/sso.mjs).
+app.use(terranovaSso())
 
 app.get('/api/auth/me', async (req, res) => {
   const acc = await currentAccount(req)

@@ -57,6 +57,9 @@ export function setSession(res, account) {
   })
 }
 
+// Signed-in home for an account (candidates only ever see their own page).
+export const landingFor = (acc) => (acc.role === 'candidate' ? '/portal/me' : '/portal')
+
 export function clearSession(res) {
   res.clearCookie(COOKIE, { path: '/' })
 }

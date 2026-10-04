@@ -9,9 +9,13 @@ import 'dotenv/config'
 // DATABASE_URL (manual) or POSTGRES_URL (auto-injected by the Vercel Postgres integration).
 const url = process.env.DATABASE_URL || process.env.POSTGRES_URL
 
+// Give up waiting for a connection after this long, so an exhausted pool or a
+// stalled database fails the request instead of hanging it forever.
+const connectionTimeoutMillis = 5_000
+
 export const pool = new pg.Pool(
   url
-    ? { connectionString: url, ssl: { rejectUnauthorized: false }, max: 3, idleTimeoutMillis: 10_000 }
+    ? { connectionString: url, ssl: { rejectUnauthorized: false }, max: 3, idleTimeoutMillis: 10_000, connectionTimeoutMillis }
     : {
         host: process.env.PGHOST || 'localhost',
         port: Number(process.env.PGPORT || 5432),
@@ -19,8 +23,13 @@ export const pool = new pg.Pool(
         password: process.env.PGPASSWORD || '',
         database: process.env.PGDATABASE || 'datjf_portal',
         max: 10,
+        connectionTimeoutMillis,
       }
 )
+
+// An idle client can error (database restart, dropped socket); log it rather
+// than let the unhandled 'error' event take the process down.
+pool.on('error', (e) => console.error(`[db] idle client error: ${e.message}`))
 
 export const query = (text, params) => pool.query(text, params)
 
