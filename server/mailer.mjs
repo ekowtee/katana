@@ -16,7 +16,11 @@ if (hasSmtp) {
   })
 }
 
-const FROM = process.env.SMTP_FROM || '"D.A. Twum Jnr. Fellowship" <no-reply@datwumfellowship.org>'
+// Emails always come from "Ninani Group HR". SMTP_FROM supplies only the
+// address; any display name in it is ignored.
+const SENDER_NAME = 'Ninani Group HR'
+const addressOf = (value) => (value?.match(/<([^>]+)>/)?.[1] || value || '').trim()
+const FROM = { name: SENDER_NAME, address: addressOf(process.env.SMTP_FROM) || 'no-reply@datwumfellowship.org' }
 const GOLD = '#C9A84C'
 const GREEN = '#08140D'
 const PAGE_BG = '#ffffff' // outer email background (behind the green card)
@@ -27,15 +31,15 @@ export function magicLinkEmail({ name, link, role }) {
       ? 'Your interview feedback is ready to view.'
       : 'Access the First Cohort selection portal.'
   return {
-    subject: 'Your secure access link — D.A. Twum Jnr. Fellowship',
-    text: `Hello ${name || ''},\n\n${audience}\n\nOpen this secure link (valid for 30 minutes):\n${link}\n\nIf you did not request this, you can ignore this email.\n\n— D.A. Twum Jnr. Fellowship`,
+    subject: `Your secure access link — ${SENDER_NAME}`,
+    text: `Hello ${name || ''},\n\n${audience}\n\nOpen this secure link (valid for 30 minutes):\n${link}\n\nIf you did not request this, you can ignore this email.\n\n— ${SENDER_NAME}`,
     html: `
     <div style="margin:0;padding:0;background:${PAGE_BG};font-family:'Segoe UI',Helvetica,Arial,sans-serif;">
       <table width="100%" cellpadding="0" cellspacing="0" style="background:${PAGE_BG};padding:40px 0;">
         <tr><td align="center">
           <table width="520" cellpadding="0" cellspacing="0" style="background:#0C1E14;border:1px solid #264A35;">
             <tr><td style="padding:40px 44px 24px;">
-              <div style="font-size:10px;letter-spacing:3px;text-transform:uppercase;color:${GOLD};font-weight:700;">D.A. Twum Jnr. Fellowship</div>
+              <div style="font-size:10px;letter-spacing:3px;text-transform:uppercase;color:${GOLD};font-weight:700;">${SENDER_NAME}</div>
               <div style="height:1px;background:#264A35;margin:18px 0 26px;"></div>
               <h1 style="margin:0 0 14px;font-size:26px;line-height:1.2;color:#F0EBE0;font-weight:600;">Hello ${name || 'there'},</h1>
               <p style="margin:0 0 26px;font-size:14px;line-height:1.7;color:#C8C2B4;">${audience}</p>
@@ -52,7 +56,7 @@ export function magicLinkEmail({ name, link, role }) {
   }
 }
 
-const REPLY_TO = process.env.SMTP_REPLY_TO || process.env.SMTP_FROM
+const REPLY_TO = process.env.SMTP_REPLY_TO || FROM
 
 export async function sendMagicLink({ to, name, link, role }) {
   console.log(`\n[mailer] Access link generated for ${to}:\n${link}\n`)

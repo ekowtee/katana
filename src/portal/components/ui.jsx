@@ -1,4 +1,3 @@
-import logo from '../../assets/main_logo.png'
 
 export const STATUS_LABEL = {
   selected: 'Selected',
@@ -28,16 +27,12 @@ export function Loader({ label = 'Loading' }) {
   )
 }
 
+// Katana's reversed (white) artwork, for the portal's dark surfaces.
 export function Brand({ small }) {
   return (
     <div className="portal-brand">
-      <img src={logo} alt="D.A. Twum Jnr. Fellowship" />
-      {!small && (
-        <div className="hidden sm:block">
-          <div className="pb-title">D.A. Twum Jnr. Fellowship</div>
-          <div className="pb-sub">Selection Portal</div>
-        </div>
-      )}
+      <img src="/brand/katana-mark-reversed.png" alt="Katana" className={small ? 'pb-mark' : 'pb-mark sm:hidden'} />
+      {!small && <img src="/brand/katana-logo-horizontal-reversed.png" alt="Katana" className="pb-logo hidden sm:block" />}
     </div>
   )
 }

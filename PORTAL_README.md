@@ -103,7 +103,7 @@ SMTP_PORT=587
 SMTP_SECURE=false
 SMTP_USER=you@gmail.com
 SMTP_PASS=<app-password>
-SMTP_FROM="D.A. Twum Jnr. Fellowship <no-reply@…>"
+SMTP_FROM="no-reply@…"   # address only; the sender name is always "Ninani Group HR"
 ```
 
 For Gmail: enable 2FA, create an **App Password**, use it as `SMTP_PASS`.

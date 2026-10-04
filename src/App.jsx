@@ -138,6 +138,13 @@ const App = () => {
     }
   }
 
+  // The site is Katana; this launch page belongs to the fellowship.
+  useEffect(() => {
+    const previous = document.title
+    document.title = 'D.A. Twum Jnr. Fellowship'
+    return () => { document.title = previous }
+  }, [])
+
   const [isMobile, setIsMobile] = useState(false)
   useEffect(() => {
     const checkMobile = () => setIsMobile(window.innerWidth < 768)
