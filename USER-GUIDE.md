@@ -70,7 +70,7 @@ Candidates get a sign-in account from the email on their CV. Nothing is sent to 
 **Admin → Cohorts → Interviews.**
 
 - Set the cohort's **default venue or meeting link** once.
-- For each candidate, set the **date & time** and length (default 45 minutes), and a different venue if needed. Click **Save**.
+- For each candidate, set the **date** and **time** and the length (default 45 minutes), and a different venue if needed. Click **Save** on the row, or **Save all changes** to save every edited row at once. Each row says *Unsaved changes* until it's saved, and *Add a time* if only the date is filled in.
 - **Send invitations for all scheduled** emails every panel member a calendar invitation (.ics). Accepting it puts the interview in Outlook, Google Calendar or Apple Calendar, with the candidate's name, the role, the venue and a link to the candidate's file in the portal. Tick **Also invite the candidates** to send each candidate their own invitation.
 - Sending again after a change **updates** the existing calendar entry. The **✕** button cancels an interview: everyone who was invited gets a cancellation and the entry is removed from their calendar.
 - The row shows when invitations were last sent and whether any failed.
