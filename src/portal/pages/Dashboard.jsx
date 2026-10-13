@@ -14,7 +14,7 @@ const STATUS_COLOR = {
   not_selected: '#E88B8B', not_assessed: '#8B97A0', review: '#8B97A0',
 }
 const GROUP_LABEL = {
-  selected: 'Selected · First Cohort', discuss: 'For Discussion', reserve: 'Reserve & Training',
+  selected: 'Selected', discuss: 'For Discussion', reserve: 'Reserve & Training',
   not_selected: 'Not Selected', not_assessed: 'Not Assessed', review: 'Under Review',
 }
 const CRIT_COLORS = ['#C9A84C', '#D9C06A', '#9FBE86', '#6FA8B5', '#C08F6F']
@@ -50,7 +50,7 @@ export default function Dashboard() {
 
   return (
     <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }}>
-      <p className="portal-eyebrow">First Cohort · Interview Window 10–12 June 2026</p>
+      <p className="portal-eyebrow">The Ninani Group Fellowship · Interviews</p>
       <h1 className="portal-h1">Selection <span className="accent">Dashboard</span></h1>
       <p className="portal-lede">
         A high-level read of the whole exercise — outcomes, where the cohort was strong, how scores are

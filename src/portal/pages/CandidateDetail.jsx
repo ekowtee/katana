@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { motion } from 'framer-motion'
-import { ArrowLeft, Quote, GraduationCap, Phone, Mail, MapPin, CalendarDays } from 'lucide-react'
+import { ArrowLeft, Quote, GraduationCap, Phone, Mail, MapPin, CalendarDays, FileText } from 'lucide-react'
 import { api } from '../lib/api'
 import { StatusChip, Loader, fmtPct, critShort } from '../components/ui'
 import { useAuth } from '../lib/AuthContext'
@@ -66,6 +66,17 @@ export default function CandidateDetail() {
           <div style={{ fontSize: 13, color: 'var(--color-cream-muted)', marginTop: 4 }}>{fmtPct(c.score_pct)} attainment</div>
         </div>
       </div>
+
+      {/* CV summary (PANEL ONLY) */}
+      {c.cv_summary && (
+        <div className="card card-pad" style={{ marginTop: '1.25rem' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+            <span className="card-title"><FileText size={13} style={{ verticalAlign: '-2px', marginRight: 6 }} />CV Summary</span>
+            <span className="tag" style={{ color: 'var(--color-gold-muted)' }}>Internal · not shown to candidate</span>
+          </div>
+          <p className="prose" style={{ marginTop: 14 }}>{c.cv_summary}</p>
+        </div>
+      )}
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '1.25rem', marginTop: '1.25rem' }} className="dash-grid">
         {/* Score breakdown */}

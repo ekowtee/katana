@@ -18,6 +18,7 @@ dist-ssr
 /Fellowship Applicants/
 /src/data/candidates.json
 /supabase/seed.sql
+/backups/
 
 # Editor directories and files
 .vscode/*

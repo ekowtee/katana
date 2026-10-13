@@ -29,7 +29,7 @@ export function magicLinkEmail({ name, link, role }) {
   const audience =
     role === 'candidate'
       ? 'Your interview feedback is ready to view.'
-      : 'Access the First Cohort selection portal.'
+      : 'Access The Ninani Group Fellowship selection portal.'
   return {
     subject: `Your secure access link — ${SENDER_NAME}`,
     text: `Hello ${name || ''},\n\n${audience}\n\nOpen this secure link (valid for 30 minutes):\n${link}\n\nIf you did not request this, you can ignore this email.\n\n— ${SENDER_NAME}`,
@@ -47,7 +47,7 @@ export function magicLinkEmail({ name, link, role }) {
               <p style="margin:26px 0 0;font-size:11px;line-height:1.6;color:#7d8a80;">This link is valid for 30 minutes and can be used once. If you didn’t request it, simply ignore this email.</p>
             </td></tr>
             <tr><td style="padding:20px 44px;border-top:1px solid #1E3B29;">
-              <div style="font-size:10px;letter-spacing:2px;text-transform:uppercase;color:#5d6b60;">First Cohort · Selection Portal</div>
+              <div style="font-size:10px;letter-spacing:2px;text-transform:uppercase;color:#5d6b60;">The Ninani Group Fellowship · Selection Portal</div>
             </td></tr>
           </table>
         </td></tr>

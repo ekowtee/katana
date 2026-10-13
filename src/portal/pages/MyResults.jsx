@@ -6,7 +6,7 @@ import { Loader, critShort } from '../components/ui'
 import { Brand } from '../components/ui'
 
 const OUTCOME = {
-  selected: { title: 'Congratulations — you’ve been selected', tone: '#6FD08C', blurb: 'The panel was impressed by your interview. Welcome to the First Cohort of the D.A. Twum Jnr. Fellowship.' },
+  selected: { title: 'Congratulations — you’ve been selected', tone: '#6FD08C', blurb: 'The panel was impressed by your interview. Welcome to The Ninani Group Fellowship.' },
   reserve: { title: 'You’ve been placed on our reserve & training track', tone: '#E0C060', blurb: 'The panel saw real promise in you. We’d love to keep developing your talent through our academy and future cohorts.' },
   discuss: { title: 'Thank you — your application is under final review', tone: '#7EC8E3', blurb: 'Your interview stood out. We’re finalising a few details and will be in touch shortly.' },
   not_selected: { title: 'Thank you for interviewing with us', tone: '#E88B8B', blurb: 'While you weren’t selected for this cohort, the panel valued your time and encourages you to stay connected.' },
@@ -34,7 +34,7 @@ export default function MyResults() {
       {/* Hero outcome */}
       <div className="card card-pad" style={{ overflow: 'hidden', position: 'relative' }}>
         <div style={{ position: 'absolute', inset: 0, background: `radial-gradient(600px 240px at 100% 0%, ${outcome.tone}14, transparent 70%)`, pointerEvents: 'none' }} />
-        <p className="portal-eyebrow" style={{ color: outcome.tone }}>D.A. Twum Jnr. Fellowship · First Cohort</p>
+        <p className="portal-eyebrow" style={{ color: outcome.tone }}>The Ninani Group Fellowship</p>
         <h1 className="portal-h1" style={{ maxWidth: '22ch' }}>{outcome.title}</h1>
         <p className="portal-lede">{outcome.blurb}</p>
         <p style={{ marginTop: 14, fontSize: 13, color: 'var(--color-cream-muted)' }}>

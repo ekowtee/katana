@@ -1,5 +1,5 @@
 -- ════════════════════════════════════════════════════════════════════════
---  D. A. TWUM JNR. FELLOWSHIP — Panel Portal schema  (PostgreSQL 18)
+--  THE NINANI GROUP FELLOWSHIP — Panel Portal schema  (PostgreSQL 18)
 --  Access control is enforced at the API layer (see server/auth.mjs).
 -- ════════════════════════════════════════════════════════════════════════
 
@@ -48,9 +48,13 @@ create table if not exists candidates (
   career_ambitions    text,
   personal_statement  text,
   capstone            text,
+  cv_summary          text,   -- panel's read of the CV (PANEL-ONLY, never shown to candidates)
   created_at    timestamptz not null default now(),
   updated_at    timestamptz not null default now()
 );
+
+-- Added after the first cohort; brings existing databases up to date.
+alter table candidates add column if not exists cv_summary text;
 
 -- Aggregate (panel-average, normalised) score per criterion.
 create table if not exists scores (
