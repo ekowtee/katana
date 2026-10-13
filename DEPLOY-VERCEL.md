@@ -16,6 +16,7 @@ serverless function (`api/index.mjs`). Routing is handled by `vercel.json`.
 | Vercel (Production, Preview) | `DATABASE_URL` (and `POSTGRES_URL`) | Neon `katana`, **pooled** endpoint (`…-pooler…neon.tech`) |
 | Local `.env` | `DATABASE_URL` left empty, plus `PGHOST` / `PGPORT` / `PGUSER` / `PGDATABASE=katana` | local Postgres |
 | Local `.env` | `PROD_DATABASE_URL` | Neon `katana`, pooled — used by the `cloud:*` scripts |
+| Local `.env` | `NEON_DATABASE_URL` / `NEON_DATABASE_URL_UNPOOLED` | Neon `katana`, pooled / **direct** (use the direct one for `pg_dump` / `pg_restore`) |
 
 The app always uses the **pooled** endpoint (serverless opens many short-lived
 connections). `db.mjs` reads `DATABASE_URL` first, then `POSTGRES_URL`.
