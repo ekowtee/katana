@@ -76,6 +76,22 @@ async function recomputeCohort(cohortSlug) {
 const slugify = (s) =>
   String(s).toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'cohort'
 
+// ── Interview panels: who may see and score each cohort ─────────────────────
+// The cohorts this staff member is on the panel for, newest first.
+export const myCohorts = (accountId) => many(
+  `select co.slug, co.name, co.role, co.created_at
+     from cohort_panel p join cohorts co on co.slug = p.cohort_slug
+    where p.account_id = $1 order by co.created_at desc, co.name`, [accountId])
+
+export async function onPanel(accountId, cohortSlug) {
+  if (!cohortSlug) return false
+  return !!(await one(`select 1 from cohort_panel where cohort_slug = $1 and account_id = $2`, [cohortSlug, accountId]))
+}
+
+// Panel members only reach candidates in cohorts they're on; admins reach any
+// (they set cohorts up), but score only where they're on the panel.
+export const mayView = async (account, cohortSlug) => account.role === 'admin' || onPanel(account.id, cohortSlug)
+
 export function assessmentRoutes() {
   const r = express.Router()
   const admin = requireAuth('admin')
@@ -88,6 +104,7 @@ export function assessmentRoutes() {
       select co.slug, co.name, co.role, co.created_at,
              (select count(*)::int from candidates c where c.cohort_slug = co.slug) as candidates,
              (select count(*)::int from questions q where q.cohort_slug = co.slug) as questions,
+             (select count(*)::int from cohort_panel p where p.cohort_slug = co.slug) as panel,
              coalesce((select json_object_agg(cc.criterion_key, cc.weight)
                          from cohort_criteria cc where cc.cohort_slug = co.slug), '{}') as weights
         from cohorts co order by co.created_at desc`)
@@ -103,6 +120,8 @@ export function assessmentRoutes() {
     let slug = slugify(name)
     if (await one(`select 1 from cohorts where slug = $1`, [slug])) slug = `${slug}-${crypto.randomBytes(2).toString('hex')}`
     await query(`insert into cohorts (slug, name, role) values ($1, $2, $3)`, [slug, name, role])
+    // Whoever creates it starts on its panel; the admin adjusts the rest.
+    await query(`insert into cohort_panel (cohort_slug, account_id) values ($1, $2)`, [slug, req.account.id])
     if (copyFrom && (await one(`select 1 from cohorts where slug = $1`, [copyFrom]))) {
       await query(
         `insert into cohort_criteria (cohort_slug, criterion_key, weight)
@@ -142,6 +161,32 @@ export function assessmentRoutes() {
           [slug, key, Number(w)])
       }
       await recomputeCohort(slug)
+    }
+    res.json({ ok: true })
+  })
+
+  // ── Interview panel (admin) ──────────────────────────────────────────────
+  // Every active staff account, and which of them are on this cohort's panel.
+  r.get('/api/admin/cohorts/:slug/panel', admin, async (req, res) => {
+    const staffList = await many(`
+      select a.id, a.email, a.role, a.display_name,
+             exists (select 1 from cohort_panel p where p.cohort_slug = $1 and p.account_id = a.id) as on_panel
+        from accounts a where a.role in ('admin', 'panel') and a.active
+       order by a.role, coalesce(a.display_name, a.email)`, [req.params.slug])
+    res.json({ staff: staffList })
+  })
+
+  // Replace the panel with exactly these staff accounts.
+  r.put('/api/admin/cohorts/:slug/panel', admin, async (req, res) => {
+    const { slug } = req.params
+    if (!(await one(`select 1 from cohorts where slug = $1`, [slug]))) return res.status(404).json({ error: 'not_found' })
+    const ids = Array.isArray(req.body?.accountIds) ? req.body.accountIds.map(String) : null
+    if (!ids) return res.status(400).json({ error: 'bad_input' })
+    const valid = new Set((await many(`select id from accounts where role in ('admin', 'panel')`)).map((a) => String(a.id)))
+    if (ids.some((id) => !valid.has(id))) return res.status(400).json({ error: 'bad_account' })
+    await query(`delete from cohort_panel where cohort_slug = $1 and not (account_id::text = any($2))`, [slug, ids])
+    for (const id of ids) {
+      await query(`insert into cohort_panel (cohort_slug, account_id) values ($1, $2) on conflict do nothing`, [slug, id])
     }
     res.json({ ok: true })
   })
@@ -197,6 +242,8 @@ export function assessmentRoutes() {
       `select c.slug, c.cohort_slug, co.name as cohort_name
          from candidates c left join cohorts co on co.slug = c.cohort_slug where c.slug = $1`, [req.params.slug])
     if (!c) return res.status(404).json({ error: 'not_found' })
+    if (!(await mayView(req.account, c.cohort_slug))) return res.status(403).json({ error: 'not_on_panel' })
+    const canScore = await onPanel(req.account.id, c.cohort_slug)
     const dimensions = await many(`
       select cr.key, cr.label, coalesce(cc.weight, cr.weight) as weight
         from criteria cr left join cohort_criteria cc on cc.cohort_slug = $1 and cc.criterion_key = cr.key
@@ -211,6 +258,7 @@ export function assessmentRoutes() {
       [c.slug, req.account.id])
     res.json({
       cohort: c.cohort_slug ? { slug: c.cohort_slug, name: c.cohort_name } : null,
+      canScore,
       scale: SCALE,
       recommendations: RECOMMENDATIONS,
       dimensions: dimensions.map((d) => ({
@@ -227,6 +275,7 @@ export function assessmentRoutes() {
     const c = await one(`select slug, cohort_slug from candidates where slug = $1`, [req.params.slug])
     if (!c) return res.status(404).json({ error: 'not_found' })
     if (!c.cohort_slug) return res.status(400).json({ error: 'no_cohort' })
+    if (!(await onPanel(req.account.id, c.cohort_slug))) return res.status(403).json({ error: 'not_on_panel' })
     const valid = new Set((await many(`select id from questions where cohort_slug = $1`, [c.cohort_slug])).map((q) => String(q.id)))
     const items = Array.isArray(req.body?.scores) ? req.body.scores : []
     for (const it of items) {

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import {
   PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip, Cell as BarCell,
@@ -7,6 +7,7 @@ import {
 import { Users, BarChart3, CheckCircle2, Gauge } from 'lucide-react'
 import { api } from '../lib/api'
 import { StatusChip, Loader, fmtPct, critShort, STATUS_LABEL } from '../components/ui'
+import { useAuth } from '../lib/AuthContext'
 
 const STATUS_ORDER = ['selected', 'discuss', 'reserve', 'not_selected', 'not_assessed', 'review']
 const STATUS_COLOR = {
@@ -23,12 +24,34 @@ export default function Dashboard() {
   const [data, setData] = useState(null)
   const [err, setErr] = useState('')
   const navigate = useNavigate()
+  const { account } = useAuth()
+  const [params, setParams] = useSearchParams()
+  const wanted = params.get('cohort') || ''
 
-  useEffect(() => { api.dashboard().then(setData).catch(() => setErr('Could not load dashboard.')) }, [])
+  useEffect(() => {
+    setData(null)
+    api.dashboard(wanted).then(setData).catch(() => setErr('Could not load dashboard.'))
+  }, [wanted])
   if (err) return <p style={{ color: 'var(--color-error)' }}>{err}</p>
   if (!data) return <Loader label="Loading dashboard" />
 
-  const { candidates, aggregate } = data
+  if (!data.cohort) {
+    return (
+      <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }}>
+        <h1 className="portal-h1">Selection <span className="accent">Dashboard</span></h1>
+        <div className="card card-pad" style={{ marginTop: '1.5rem', maxWidth: 620 }}>
+          <p style={{ fontSize: 13.5, color: 'var(--color-cream)', lineHeight: 1.7 }}>You’re not on the interview panel for any cohort yet.</p>
+          <p style={{ fontSize: 12.5, color: 'var(--color-cream-muted)', lineHeight: 1.7, marginTop: 6 }}>
+            {account?.role === 'admin'
+              ? <>Add yourself under <a href="/portal/admin?tab=cohorts" style={{ color: 'var(--color-gold)' }}>Admin → Cohorts → Interview panel</a>.</>
+              : 'Ask an administrator to add you to the panel for the cohort you’re interviewing.'}
+          </p>
+        </div>
+      </motion.div>
+    )
+  }
+
+  const { candidates, aggregate, cohort, cohorts } = data
   // node-postgres returns numeric columns as strings — coerce up front.
   const num = (v) => (v == null ? null : Number(v))
   const scored = candidates.filter((c) => c.scored && c.score_pct != null).map((c) => ({ ...c, score_pct: num(c.score_pct) }))
@@ -50,10 +73,22 @@ export default function Dashboard() {
 
   return (
     <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }}>
-      <p className="portal-eyebrow">The Ninani Group Fellowship · Interviews</p>
-      <h1 className="portal-h1">Selection <span className="accent">Dashboard</span></h1>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 16, flexWrap: 'wrap' }}>
+        <div>
+          <p className="portal-eyebrow">{cohort.name}{cohort.role ? ` · ${cohort.role}` : ''}</p>
+          <h1 className="portal-h1">Selection <span className="accent">Dashboard</span></h1>
+        </div>
+        {cohorts.length > 1 && (
+          <div style={{ minWidth: 220 }}>
+            <label>Cohort</label>
+            <select value={cohort.slug} onChange={(e) => setParams({ cohort: e.target.value })}>
+              {cohorts.map((c) => <option key={c.slug} value={c.slug}>{c.name}{c.role ? ` — ${c.role}` : ''}</option>)}
+            </select>
+          </div>
+        )}
+      </div>
       <p className="portal-lede">
-        A high-level read of the whole exercise — outcomes, where the cohort was strong, how scores are
+        A high-level read of this cohort — outcomes, where the cohort was strong, how scores are
         distributed, and the full ranking grouped by decision. Click any candidate for their full file.
       </p>
 

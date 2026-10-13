@@ -8,7 +8,7 @@ import {
 } from './auth.mjs'
 import { sendMagicLink, smtpConfigured } from './mailer.mjs'
 import { terranovaSso } from './sso.mjs'
-import { assessmentRoutes, recomputeCandidate, rankCohort } from './assessment.mjs'
+import { assessmentRoutes, recomputeCandidate, rankCohort, myCohorts, mayView } from './assessment.mjs'
 import { cvRoutes } from './cv-ingest.mjs'
 import { settingsRoutes } from './settings-routes.mjs'
 
@@ -72,32 +72,43 @@ app.get('/api/auth/me', async (req, res) => {
 // ════════════════════════════════════════════════════════════════════════
 //  DASHBOARD  (panel + admin)
 // ════════════════════════════════════════════════════════════════════════
+// Candidates by decision STATUS first (selected at the top), then by score — so
+// the selection cutoff falls cleanly below the selected group.
+const candidateRows = (where, params) => many(`
+  select slug, name, category, rank, interview_day, total_50, score_pct, status, scored,
+         recommendations_summary, panel_reading, cohort_slug
+    from candidates ${where}
+   order by case status
+              when 'selected' then 0 when 'discuss' then 1 when 'reserve' then 2
+              when 'not_selected' then 3 when 'not_assessed' then 4 else 5 end,
+            (score_pct is null), score_pct desc, name`, params)
+
+// One cohort at a time, and only cohorts the signed-in staff member is on the
+// interview panel for (admins included). ?cohort= picks one; default newest.
 app.get('/api/dashboard', requireAuth('panel', 'admin'), async (req, res) => {
+  const cohorts = await myCohorts(req.account.id)
+  const cohort = cohorts.find((c) => c.slug === req.query.cohort) || cohorts[0] || null
   const settings = await one(`select cutoff_rank from app_settings where id = 1`)
-  const criteria = await many(`select key, label, weight, sort_order from criteria order by sort_order`)
-  // Order by decision STATUS first (selected at the top), then by score — so the
-  // selection cutoff falls cleanly below the selected group.
-  const candidates = await many(`
-    select slug, name, category, rank, interview_day, total_50, score_pct, status, scored,
-           recommendations_summary, panel_reading, cohort_slug
-      from candidates
-     order by case status
-                when 'selected' then 0 when 'discuss' then 1 when 'reserve' then 2
-                when 'not_selected' then 3 when 'not_assessed' then 4 else 5 end,
-              (score_pct is null), score_pct desc, name`)
-  // Per-criterion cohort stats across scored candidates (avg / min / max % of weight).
+  const criteria = await many(`
+    select cr.key, cr.label, coalesce(cc.weight, cr.weight) as weight, cr.sort_order
+      from criteria cr left join cohort_criteria cc on cc.cohort_slug = $1 and cc.criterion_key = cr.key
+     order by cr.sort_order`, [cohort?.slug ?? null])
+  const candidates = cohort ? await candidateRows(`where cohort_slug = $1`, [cohort.slug]) : []
+  // Per-criterion stats across this cohort's scored candidates (avg / min / max % of weight).
   const agg = await many(`
-    select c.key, c.label, c.weight,
+    select c.key, c.label, coalesce(cc.weight, c.weight) as weight,
            avg(s.avg_norm) as avg_points,
            avg(s.avg_norm / nullif(coalesce(cc.weight, c.weight),0)) * 100 as avg_pct,
            min(s.avg_norm / nullif(coalesce(cc.weight, c.weight),0)) * 100 as min_pct,
            max(s.avg_norm / nullif(coalesce(cc.weight, c.weight),0)) * 100 as max_pct
       from criteria c
-      left join scores s on s.criterion_key = c.key
-      left join candidates cd on cd.slug = s.candidate_slug
-      left join cohort_criteria cc on cc.cohort_slug = cd.cohort_slug and cc.criterion_key = c.key
-     group by c.key, c.label, c.weight order by c.sort_order`)
+      left join cohort_criteria cc on cc.cohort_slug = $1 and cc.criterion_key = c.key
+      left join candidates cd on cd.cohort_slug = $1
+      left join scores s on s.criterion_key = c.key and s.candidate_slug = cd.slug
+     group by c.key, c.label, coalesce(cc.weight, c.weight), c.sort_order order by c.sort_order`, [cohort?.slug ?? null])
   res.json({
+    cohorts,
+    cohort,
     cutoffRank: settings?.cutoff_rank ?? 10,
     criteria,
     candidates,
@@ -117,6 +128,7 @@ app.get('/api/dashboard', requireAuth('panel', 'admin'), async (req, res) => {
 app.get('/api/candidates/:slug', requireAuth('panel', 'admin'), async (req, res) => {
   const c = await one(`select * from candidates where slug = $1`, [req.params.slug])
   if (!c) return res.status(404).json({ error: 'not_found' })
+  if (!(await mayView(req.account, c.cohort_slug))) return res.status(403).json({ error: 'not_on_panel' })
   const scores = await many(`
     select s.criterion_key, cr.label, coalesce(cc.weight, cr.weight) as weight, s.avg_norm
       from scores s join criteria cr on cr.key = s.criterion_key
@@ -162,6 +174,12 @@ app.get('/api/me', requireAuth('candidate'), async (req, res) => {
 //  ADMIN
 // ════════════════════════════════════════════════════════════════════════
 const admin = requireAuth('admin')
+
+// Every candidate, for the Admin pages (all cohorts, regardless of panel).
+app.get('/api/admin/candidates', admin, async (req, res) => {
+  const criteria = await many(`select key, label, weight, sort_order from criteria order by sort_order`)
+  res.json({ criteria, candidates: await candidateRows('', []) })
+})
 
 app.get('/api/admin/overview', admin, async (req, res) => {
   const accounts = await many(`

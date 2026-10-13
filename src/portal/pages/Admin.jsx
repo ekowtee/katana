@@ -25,7 +25,7 @@ export default function Admin() {
   const [toast, setToast] = useState('')
 
   const load = () => api.admin.overview().then(setOverview)
-  const reloadDash = () => api.dashboard().then(setDash)
+  const reloadDash = () => api.admin.candidates().then(setDash) // all cohorts, for the Admin pages
   const reloadCohorts = () => api.admin.cohorts().then(setCohorts)
   useEffect(() => { load(); reloadDash(); reloadCohorts() }, [])
 
@@ -155,7 +155,10 @@ function AccountRow({ a, reload, flash }) {
 
 /* ── Feedback curation ─────────────────────────────────────────────────────── */
 function FeedbackTab({ dash, cohorts, reloadDash, initialSlug, onSelect, flash }) {
-  const [slug, setSlug] = useState(initialSlug || dash.candidates[0]?.slug || '')
+  const [cohortFilter, setCohortFilter] = useState(() =>
+    dash.candidates.find((c) => c.slug === initialSlug)?.cohort_slug ?? cohorts[0]?.slug ?? '')
+  const shown = dash.candidates.filter((c) => cohortFilter === '*' || (c.cohort_slug || '') === cohortFilter)
+  const [slug, setSlug] = useState(initialSlug || shown[0]?.slug || '')
   const [items, setItems] = useState({}) // key -> {body, approved}; key '' = overall
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -184,6 +187,23 @@ function FeedbackTab({ dash, cohorts, reloadDash, initialSlug, onSelect, flash }
 
   return (
     <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,260px) minmax(0,1fr)', gap: '1.25rem' }} className="dash-grid">
+      <div style={{ gridColumn: '1 / -1', display: 'flex', alignItems: 'flex-end', gap: 12, flexWrap: 'wrap' }}>
+        <div style={{ minWidth: 240 }}>
+          <label>Cohort</label>
+          <select value={cohortFilter} onChange={(e) => {
+            const v = e.target.value
+            setCohortFilter(v)
+            const first = dash.candidates.find((c) => v === '*' || (c.cohort_slug || '') === v)
+            setSlug(first?.slug || ''); onSelect(first?.slug || '')
+          }}>
+            {cohorts.map((co) => <option key={co.slug} value={co.slug}>{co.name}{co.role ? ` — ${co.role}` : ''}</option>)}
+            {dash.candidates.some((c) => !c.cohort_slug) && <option value="">No cohort</option>}
+            <option value="*">All cohorts</option>
+          </select>
+        </div>
+        <span style={{ fontSize: 11, color: 'var(--color-cream-muted)', paddingBottom: 10 }}>{shown.length} candidate{shown.length === 1 ? '' : 's'}</span>
+      </div>
+
       {/* Mobile-only Candidate Selector */}
       <div className="md:hidden block">
         <label>Select Candidate</label>
@@ -192,7 +212,7 @@ function FeedbackTab({ dash, cohorts, reloadDash, initialSlug, onSelect, flash }
           onChange={(e) => { setSlug(e.target.value); onSelect(e.target.value) }}
           style={{ width: '100%', marginBottom: '1rem' }}
         >
-          {dash.candidates.map((c) => (
+          {shown.map((c) => (
             <option key={c.slug} value={c.slug} style={{ backgroundColor: 'var(--color-panel-green)' }}>
               {c.rank ? `${c.rank}. ` : ''}{c.name} ({c.status})
             </option>
@@ -203,7 +223,7 @@ function FeedbackTab({ dash, cohorts, reloadDash, initialSlug, onSelect, flash }
       {/* Desktop-only Candidate Sidebar */}
       <div className="card hidden md:block" style={{ alignSelf: 'start', maxHeight: '70vh', overflowY: 'auto' }}>
         <div className="card-pad card-hairline"><span className="card-title">Candidates</span></div>
-        {dash.candidates.map((c) => (
+        {shown.map((c) => (
           <button key={c.slug} onClick={() => { setSlug(c.slug); onSelect(c.slug) }}
             style={{ width: '100%', textAlign: 'left', padding: '0.7rem 1rem', background: c.slug === slug ? 'var(--color-gold-faint)' : 'transparent', border: 'none', borderBottom: '1px solid rgba(38,74,53,0.5)', cursor: 'pointer' }}>
             <div style={{ fontSize: 12.5, color: c.slug === slug ? 'var(--color-gold)' : 'var(--color-cream)' }}>{c.rank ? `${c.rank}. ` : ''}{c.name}</div>
@@ -213,7 +233,9 @@ function FeedbackTab({ dash, cohorts, reloadDash, initialSlug, onSelect, flash }
       </div>
 
       <div className="card card-pad">
-        {loading ? <div className="spin" /> : (
+        {!candidate ? (
+          <p style={{ fontSize: 12.5, color: 'var(--color-cream-muted)' }}>No candidates in this cohort yet. Upload CVs under Cohorts.</p>
+        ) : loading ? <div className="spin" /> : (
           <>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 8 }}>
               <div>
@@ -312,6 +334,7 @@ function CohortsTab({ data, reload, reloadDash, flash }) {
       {cohort && !creating && (
         <>
           <CohortSettings key={cohort.slug} cohort={cohort} criteria={criteria} reload={reload} flash={flash} />
+          <PanelCard key={`panel-${cohort.slug}`} cohort={cohort} onSaved={reload} flash={flash} />
           <CvsCard key={`cv-${cohort.slug}`} cohort={cohort} onCandidates={() => { reload(); reloadDash() }} flash={flash} />
           <QuestionList key={`q-${cohort.slug}`} cohort={cohort} criteria={criteria} scale={scale} reloadCohorts={reload} flash={flash} />
         </>
@@ -390,6 +413,58 @@ function CohortSettings({ cohort, criteria, reload, flash }) {
         </div>
       </div>
       <button className="btn-gold btn-sm" style={{ marginTop: 14 }} disabled={busy || !changed || !valid} onClick={save}>{busy ? 'Saving…' : 'Save cohort'}</button>
+    </div>
+  )
+}
+
+// Which staff interview this cohort: only they see it on the dashboard and
+// score its candidates.
+function PanelCard({ cohort, onSaved, flash }) {
+  const [staff, setStaff] = useState(null)
+  const [picked, setPicked] = useState(new Set())
+  const [busy, setBusy] = useState(false)
+  useEffect(() => {
+    api.admin.panel(cohort.slug)
+      .then((r) => { setStaff(r.staff); setPicked(new Set(r.staff.filter((x) => x.on_panel).map((x) => x.id))) })
+      .catch(() => {})
+  }, [cohort.slug])
+  if (!staff) return <div className="card card-pad"><div className="spin" /></div>
+
+  const before = new Set(staff.filter((x) => x.on_panel).map((x) => x.id))
+  const changed = picked.size !== before.size || [...picked].some((id) => !before.has(id))
+  const toggle = (id) => setPicked((p) => { const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n })
+  const save = async () => {
+    setBusy(true)
+    try {
+      await api.admin.savePanel(cohort.slug, [...picked])
+      setStaff((list) => list.map((x) => ({ ...x, on_panel: picked.has(x.id) })))
+      onSaved(); flash('Interview panel saved')
+    } catch { flash('Could not save the panel') } finally { setBusy(false) }
+  }
+
+  return (
+    <div className="card card-pad">
+      <span className="card-title"><Users2 size={13} style={{ verticalAlign: '-2px', marginRight: 6 }} />Interview panel · {picked.size}</span>
+      <p style={{ fontSize: 12, color: 'var(--color-cream-muted)', margin: '8px 0 14px', lineHeight: 1.6 }}>
+        Only the people ticked here see this cohort on their dashboard, open its candidates and score them. Add new panel members under Access &amp; Invites first.
+      </p>
+      {staff.length === 0 && <p style={{ fontSize: 12, color: 'var(--color-cream-muted)', fontStyle: 'italic' }}>No admin or panel accounts yet.</p>}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+        {staff.map((x) => (
+          <label key={x.id} style={{
+            display: 'flex', alignItems: 'center', gap: 10, margin: 0, cursor: 'pointer', textTransform: 'none', letterSpacing: 0,
+            padding: '0.55rem 0.75rem', border: '1px solid var(--color-border-green)', borderRadius: 'var(--radius-sm)',
+            background: picked.has(x.id) ? 'var(--color-gold-faint)' : 'transparent',
+          }}>
+            <input type="checkbox" checked={picked.has(x.id)} onChange={() => toggle(x.id)} style={{ width: 15, height: 15, flexShrink: 0 }} />
+            <span style={{ minWidth: 0 }}>
+              <span style={{ display: 'block', fontSize: 12.5, color: 'var(--color-cream)' }}>{x.display_name || x.email}</span>
+              <span style={{ display: 'block', fontSize: 10.5, color: 'var(--color-cream-muted)' }} className="break-all">{x.role === 'admin' ? 'Admin' : 'Panel'} · {x.email}</span>
+            </span>
+          </label>
+        ))}
+      </div>
+      <button className="btn-gold btn-sm" style={{ marginTop: 14 }} disabled={busy || !changed} onClick={save}>{busy ? 'Saving…' : 'Save panel'}</button>
     </div>
   )
 }

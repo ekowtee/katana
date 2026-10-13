@@ -147,6 +147,16 @@ create table if not exists cohort_criteria (
 
 alter table candidates add column if not exists cohort_slug text references cohorts(slug) on delete set null;
 
+-- The staff (panel members and admins) who interview a cohort. Only they see
+-- it on the dashboard, open its candidates' files (admins also can, from the
+-- Admin pages) and score them.
+create table if not exists cohort_panel (
+  cohort_slug  text not null references cohorts(slug) on delete cascade,
+  account_id   uuid not null references accounts(id) on delete cascade,
+  added_at     timestamptz not null default now(),
+  primary key (cohort_slug, account_id)
+);
+
 create table if not exists questions (
   id            bigserial primary key,
   cohort_slug   text not null references cohorts(slug) on delete cascade,

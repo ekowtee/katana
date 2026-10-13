@@ -17,7 +17,9 @@ export default function CandidateDetail() {
 
   useEffect(() => {
     setD(null)
-    api.candidate(slug).then(setD).catch(() => setErr('Could not load candidate.'))
+    api.candidate(slug).then(setD).catch((e) => setErr(e.code === 'not_on_panel'
+      ? 'This candidate is in a cohort whose interview panel you’re not on.'
+      : 'Could not load candidate.'))
   }, [slug])
   // After the panel member saves scores: refresh totals without the loader.
   const reload = () => api.candidate(slug).then(setD).catch(() => {})
@@ -35,7 +37,7 @@ export default function CandidateDetail() {
 
   return (
     <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }}>
-      <button className="btn-ghost btn-sm" onClick={() => navigate('/portal')} style={{ marginBottom: '1.25rem' }}>
+      <button className="btn-ghost btn-sm" onClick={() => navigate(c.cohort_slug ? `/portal?cohort=${encodeURIComponent(c.cohort_slug)}` : '/portal')} style={{ marginBottom: '1.25rem' }}>
         <ArrowLeft size={14} /> Dashboard
       </button>
 
@@ -239,7 +241,12 @@ function AssessmentCard({ slug, isAdmin, onSaved }) {
         <span className="tag">{a.cohort ? `${a.cohort.name} · ` : ''}{done} of {all.length} scored</span>
       </div>
 
-      {!a.cohort ? (
+      {a.cohort && !a.canScore ? (
+        <p style={{ fontSize: 12.5, color: 'var(--color-cream-muted)', marginTop: 14 }}>
+          You’re not on the interview panel for {a.cohort.name}, so you can’t score this candidate.
+          {isAdmin && <> Add yourself under <Link to="/portal/admin?tab=cohorts" style={{ color: 'var(--color-gold)' }}>Admin → Cohorts → Interview panel</Link>.</>}
+        </p>
+      ) : !a.cohort ? (
         <p style={{ fontSize: 12.5, color: 'var(--color-cream-muted)', marginTop: 14 }}>
           This candidate isn’t in a cohort yet, so there are no questions to score.
           {isAdmin && <> Assign one in <Link to={`/portal/admin?candidate=${slug}`} style={{ color: 'var(--color-gold)' }}>Admin → Candidate Feedback</Link>.</>}

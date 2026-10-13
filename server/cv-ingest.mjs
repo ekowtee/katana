@@ -1,7 +1,7 @@
 import express from 'express'
 import { many, one, query } from './db.mjs'
 import { requireAuth } from './auth.mjs'
-import { recomputeCandidate, rankCohort } from './assessment.mjs'
+import { recomputeCandidate, rankCohort, mayView } from './assessment.mjs'
 import { aiConfig } from './settings.mjs'
 import { readCv } from './ai.mjs'
 
@@ -120,8 +120,9 @@ export function cvRoutes() {
 
   // The CV itself, for panel and admin (opens in the browser's PDF viewer).
   r.get('/api/cvs/:id/file', staff, async (req, res) => {
-    const f = await one(`select filename, content_type, data from cv_files where id = $1`, [req.params.id])
+    const f = await one(`select filename, content_type, data, cohort_slug from cv_files where id = $1`, [req.params.id])
     if (!f) return res.status(404).json({ error: 'not_found' })
+    if (!(await mayView(req.account, f.cohort_slug))) return res.status(403).json({ error: 'not_on_panel' })
     res.set('Content-Type', f.content_type)
     res.set('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(f.filename)}`)
     res.set('Cache-Control', 'private, no-store')
