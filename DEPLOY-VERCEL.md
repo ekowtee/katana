@@ -3,9 +3,9 @@
 The app is one Vercel project: the Vite SPA (static) + the Express API as a single
 serverless function (`api/index.mjs`). Routing is handled by `vercel.json`.
 
-> **Database: Neon.** Production is the `neondb` database in the Neon project; local
-> development uses a separate `katana_dev` database in the same project (a copy of
-> production taken when the portal moved off Prisma Postgres, 13 Oct 2026).
+> **Database.** Production is the `katana` database in the Neon project (moved off
+> Prisma Postgres on 13 Oct 2026). Local development uses a `katana` database on your
+> own Postgres (`localhost:5432`), started as a copy of production.
 
 ---
 
@@ -13,9 +13,9 @@ serverless function (`api/index.mjs`). Routing is handled by `vercel.json`.
 
 | Where | Variable | Points at |
 |---|---|---|
-| Vercel (Production, Preview) | `DATABASE_URL` (and `POSTGRES_URL`) | Neon `neondb`, **pooled** endpoint (`…-pooler…neon.tech`) |
-| Local `.env` | `DATABASE_URL` | Neon `katana_dev`, pooled |
-| Local `.env` | `PROD_DATABASE_URL` | Neon `neondb`, pooled — used by the `cloud:*` scripts |
+| Vercel (Production, Preview) | `DATABASE_URL` (and `POSTGRES_URL`) | Neon `katana`, **pooled** endpoint (`…-pooler…neon.tech`) |
+| Local `.env` | `DATABASE_URL` left empty, plus `PGHOST` / `PGPORT` / `PGUSER` / `PGDATABASE=katana` | local Postgres |
+| Local `.env` | `PROD_DATABASE_URL` | Neon `katana`, pooled — used by the `cloud:*` scripts |
 
 The app always uses the **pooled** endpoint (serverless opens many short-lived
 connections). `db.mjs` reads `DATABASE_URL` first, then `POSTGRES_URL`.
@@ -27,7 +27,7 @@ those tools make (`search_path = ''`) would leak into the app's connections.
 ## 2. Schema and data
 
 ```bash
-npm run db:schema      # apply server/sql/schema.sql to local (katana_dev); re-runnable
+npm run db:schema      # apply server/sql/schema.sql to local Postgres (katana); re-runnable
 npm run cloud:schema   # … to production
 npm run ingest         # regenerate supabase/seed.sql from scripts/contacts.mjs
 npm run cloud:push     # production: schema → seed → accounts → feedback drafts
@@ -42,7 +42,7 @@ the same in PowerShell and Bash and don't need `psql`. Note that `cloud:push` al
 Project → Settings → Environment Variables (Production):
 
 ```
-DATABASE_URL   = <Neon pooled connection string, neondb>   # POSTGRES_URL is set to the same
+DATABASE_URL   = <Neon pooled connection string, database katana>   # POSTGRES_URL is set to the same
 APP_URL        = https://katana.ninanigroup.com  # your public domain, no trailing slash
 JWT_SECRET     = <run: node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))">
 SMTP_HOST      = smtp.gmail.com
@@ -101,5 +101,5 @@ count). The count is in memory, per function instance.
   or better deliverability later, consider a transactional API (Resend/SendGrid).
 - **Cold starts:** first request after idle is slightly slower while the function and
   DB connection warm up. Normal for serverless.
-- **Local dev** (`npm run dev:all`) uses the Neon `katana_dev` database from `.env`,
-  so it never touches production data.
+- **Local dev** (`npm run dev:all`) uses the local Postgres `katana` database (PG* vars
+  in `.env`, `DATABASE_URL` empty), so it never touches production data.

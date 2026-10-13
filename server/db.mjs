@@ -2,10 +2,9 @@ import pg from 'pg'
 import 'dotenv/config'
 
 // Two modes:
-//  • DATABASE_URL set  → cloud Postgres (Neon / Vercel Postgres / Supabase) with
-//    SSL and a small pool (serverless-friendly). Use the *pooled* connection
-//    string from your provider.
-//  • otherwise         → local Postgres via PG* vars (dev).
+//  • DATABASE_URL set  → Neon (production: database `katana`, pooled endpoint)
+//    with SSL and a small pool (serverless-friendly).
+//  • otherwise         → local Postgres via PG* vars (dev; database `katana`).
 // DATABASE_URL (manual) or POSTGRES_URL (auto-injected by the Vercel Postgres integration).
 const url = process.env.DATABASE_URL || process.env.POSTGRES_URL
 
@@ -21,7 +20,7 @@ export const pool = new pg.Pool(
         port: Number(process.env.PGPORT || 5432),
         user: process.env.PGUSER || 'postgres',
         password: process.env.PGPASSWORD || '',
-        database: process.env.PGDATABASE || 'datjf_portal',
+        database: process.env.PGDATABASE || 'katana',
         max: 10,
         connectionTimeoutMillis,
       }
