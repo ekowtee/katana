@@ -48,7 +48,8 @@ export default function CandidateDetail() {
               <h1 className="portal-h1" style={{ fontSize: '2rem', marginTop: 0 }}>{c.name}</h1>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
                 <StatusChip status={c.status} />
-                <span className="tag">{c.category}</span>
+                {d.cohort && <span className="tag" style={{ color: 'var(--color-gold-muted)' }}>{d.cohort.name}{d.cohort.role ? ` · ${d.cohort.role}` : ''}</span>}
+                {c.category && <span className="tag">{c.category}</span>}
                 {c.interview_day && <span className="tag"><CalendarDays size={10} style={{ verticalAlign: '-1px', marginRight: 4 }} />{c.interview_day}</span>}
               </div>
             </div>
@@ -58,6 +59,7 @@ export default function CandidateDetail() {
             {c.email && <Meta icon={<Mail size={13} />}><a href={`mailto:${c.email}`} style={{ color: 'inherit' }} className="break-all">{c.email}</a></Meta>}
             {c.phone && <Meta icon={<Phone size={13} />}>{c.phone}</Meta>}
             {c.address && <Meta icon={<MapPin size={13} />}>{c.address}</Meta>}
+            {d.cvFile && <Meta icon={<FileText size={13} />}><a href={`/api/cvs/${d.cvFile.id}/file`} target="_blank" rel="noreferrer" style={{ color: 'var(--color-gold)' }}>View CV</a></Meta>}
           </div>
         </div>
         <div className="text-left sm:text-right mt-4 sm:mt-0">
@@ -257,7 +259,7 @@ function AssessmentCard({ slug, isAdmin, onSaved }) {
                 {dim.questions.length === 0 && (
                   <p style={{ fontSize: 12, color: 'var(--color-cream-muted)', fontStyle: 'italic' }}>
                     No questions set for this dimension yet.
-                    {isAdmin && <> Add them in <Link to="/portal/admin?tab=questions" style={{ color: 'var(--color-gold)' }}>Admin → Interview Questions</Link>.</>}
+                    {isAdmin && <> Add them in <Link to="/portal/admin?tab=cohorts" style={{ color: 'var(--color-gold)' }}>Admin → Cohorts</Link>.</>}
                   </p>
                 )}
                 <div style={{ display: 'grid', gap: 10 }}>

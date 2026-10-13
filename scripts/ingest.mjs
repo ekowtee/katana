@@ -331,7 +331,8 @@ for (const c of candidates) {
   sql += `\n-- ${c.name} ${'-'.repeat(Math.max(0, 60 - c.name.length))}\n`
   // Only workbook data may overwrite results; otherwise they come from the
   // panel's in-app scoring and the admin's decisions, so leave them alone.
-  // An admin's move to another cohort is kept too.
+  // An admin's move to another cohort, and a summary written from an uploaded
+  // CV, are kept too.
   sql += `insert into candidates (slug, name, gender, dob, email, phone, address, category, discipline, unit, institution, country, can_commit, rank, interview_day, total_50, score_pct, recommendations_summary, panel_reading, status, scored, why_fellowship, career_ambitions, personal_statement, capstone, cv_summary, cohort_slug)
 values (${q(c.slug)}, ${q(c.name)}, ${q(c.gender)}, ${q(c.dob)}, ${q(c.email)}, ${q(c.phone)}, ${q(c.address)}, ${q(c.category)}, ${q(c.discipline)}, ${q(c.unit)}, ${q(c.institution)}, ${q(c.country)}, ${qb(c.canCommit)}, ${qn(c.rank)}, ${q(c.interviewDay)}, ${qn(c.total50)}, ${qn(c.scorePct)}, ${q(c.recommendationsSummary)}, ${q(c.panelReading)}, ${q(c.status)}, ${qb(c.scored)}, ${q(c.submissions.whyFellowship)}, ${q(c.submissions.careerAmbitions)}, ${q(c.submissions.personalStatement)}, ${q(c.submissions.capstone)}, ${q(c.cvSummary)}, ${q(COHORT.slug)})
 on conflict (slug) do update set
@@ -340,7 +341,7 @@ ${imported ? `  rank = excluded.rank, total_50 = excluded.total_50, score_pct = 
   status = excluded.status, scored = excluded.scored, interview_day = excluded.interview_day,
 ` : ''}  why_fellowship = excluded.why_fellowship, career_ambitions = excluded.career_ambitions,
   personal_statement = excluded.personal_statement, capstone = excluded.capstone,
-  cv_summary = excluded.cv_summary, cohort_slug = coalesce(candidates.cohort_slug, excluded.cohort_slug);\n`
+  cv_summary = coalesce(candidates.cv_summary, excluded.cv_summary), cohort_slug = coalesce(candidates.cohort_slug, excluded.cohort_slug);\n`
 
   for (const s of c.scores) {
     sql += `insert into scores (candidate_slug, criterion_key, avg_norm) values (${q(c.slug)}, ${q(s.criterion)}, ${qn(s.avg)}) on conflict (candidate_slug, criterion_key) do update set avg_norm = excluded.avg_norm;\n`

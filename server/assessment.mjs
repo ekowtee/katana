@@ -85,7 +85,7 @@ export function assessmentRoutes() {
   r.get('/api/admin/cohorts', admin, async (req, res) => {
     const criteria = await many(`select key, label, weight, sort_order from criteria order by sort_order`)
     const cohorts = await many(`
-      select co.slug, co.name, co.created_at,
+      select co.slug, co.name, co.role, co.created_at,
              (select count(*)::int from candidates c where c.cohort_slug = co.slug) as candidates,
              (select count(*)::int from questions q where q.cohort_slug = co.slug) as questions,
              coalesce((select json_object_agg(cc.criterion_key, cc.weight)
@@ -98,10 +98,11 @@ export function assessmentRoutes() {
   r.post('/api/admin/cohorts', admin, async (req, res) => {
     const name = String(req.body?.name || '').trim()
     if (!name) return res.status(400).json({ error: 'name_required' })
+    const role = String(req.body?.role || '').trim() || null
     const copyFrom = req.body?.copyFrom || null
     let slug = slugify(name)
     if (await one(`select 1 from cohorts where slug = $1`, [slug])) slug = `${slug}-${crypto.randomBytes(2).toString('hex')}`
-    await query(`insert into cohorts (slug, name) values ($1, $2)`, [slug, name])
+    await query(`insert into cohorts (slug, name, role) values ($1, $2, $3)`, [slug, name, role])
     if (copyFrom && (await one(`select 1 from cohorts where slug = $1`, [copyFrom]))) {
       await query(
         `insert into cohort_criteria (cohort_slug, criterion_key, weight)
@@ -120,12 +121,13 @@ export function assessmentRoutes() {
     res.json({ ok: true, slug })
   })
 
-  // Rename and/or re-weight. Re-weighting rescores everyone in the cohort.
+  // Rename, set the role, and/or re-weight. Re-weighting rescores everyone in the cohort.
   r.patch('/api/admin/cohorts/:slug', admin, async (req, res) => {
     const { slug } = req.params
     if (!(await one(`select 1 from cohorts where slug = $1`, [slug]))) return res.status(404).json({ error: 'not_found' })
     const name = typeof req.body?.name === 'string' ? req.body.name.trim() : ''
     if (name) await query(`update cohorts set name = $2 where slug = $1`, [slug, name])
+    if (typeof req.body?.role === 'string') await query(`update cohorts set role = $2 where slug = $1`, [slug, req.body.role.trim() || null])
     const weights = req.body?.weights
     if (weights && typeof weights === 'object') {
       const keys = (await many(`select key from criteria`)).map((c) => c.key)

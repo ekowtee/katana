@@ -1,26 +1,34 @@
 import nodemailer from 'nodemailer'
 import 'dotenv/config'
+import { smtpConfig } from './settings.mjs'
 
-// SMTP is optional: if creds are absent, we log the link instead of sending,
-// so the admin "copy link" flow keeps working before email is configured.
-const SMTP_PASS = process.env.SMTP_PASS || process.env.SMTP_PASSWORD
-const hasSmtp = !!(process.env.SMTP_HOST && process.env.SMTP_USER && SMTP_PASS)
+// SMTP is optional: if it isn't configured (Admin → Settings, or the SMTP_*
+// env vars), we log the link instead of sending, so the admin "copy link"
+// flow keeps working before email is set up.
 
-let transporter = null
-if (hasSmtp) {
-  transporter = nodemailer.createTransport({
-    host: process.env.SMTP_HOST,
-    port: Number(process.env.SMTP_PORT || 587),
-    secure: String(process.env.SMTP_SECURE || 'false') === 'true',
-    auth: { user: process.env.SMTP_USER, pass: SMTP_PASS },
-  })
-}
-
-// Emails always come from "Ninani Group HR". SMTP_FROM supplies only the
-// address; any display name in it is ignored.
+// Emails always come from "Ninani Group HR". The From setting supplies only
+// the address; any display name in it is ignored.
 const SENDER_NAME = 'Ninani Group HR'
 const addressOf = (value) => (value?.match(/<([^>]+)>/)?.[1] || value || '').trim()
-const FROM = { name: SENDER_NAME, address: addressOf(process.env.SMTP_FROM) || 'no-reply@datwumfellowship.org' }
+
+// One transporter per distinct configuration, rebuilt when settings change.
+let cached = { key: null, transporter: null }
+async function transport() {
+  const cfg = await smtpConfig()
+  if (!cfg) return null
+  const key = JSON.stringify([cfg.host, cfg.port, cfg.secure, cfg.user, cfg.pass])
+  if (cached.key !== key) {
+    cached = {
+      key,
+      transporter: nodemailer.createTransport({
+        host: cfg.host, port: cfg.port, secure: cfg.secure,
+        auth: cfg.user ? { user: cfg.user, pass: cfg.pass } : undefined,
+      }),
+    }
+  }
+  const from = { name: SENDER_NAME, address: addressOf(cfg.from) || addressOf(cfg.user) || 'no-reply@datwumfellowship.org' }
+  return { transporter: cached.transporter, from, replyTo: cfg.replyTo || from }
+}
 const GOLD = '#C9A84C'
 const GREEN = '#08140D'
 const PAGE_BG = '#ffffff' // outer email background (behind the green card)
@@ -56,17 +64,27 @@ export function magicLinkEmail({ name, link, role }) {
   }
 }
 
-const REPLY_TO = process.env.SMTP_REPLY_TO || FROM
-
 export async function sendMagicLink({ to, name, link, role }) {
   console.log(`\n[mailer] Access link generated for ${to}:\n${link}\n`)
-  const msg = magicLinkEmail({ name, link, role })
-  if (!transporter) {
-    return { delivered: false, reason: 'smtp_not_configured' }
-  }
+  return send(to, magicLinkEmail({ name, link, role }))
+}
+
+// Admin → Settings "Send test email".
+export async function sendTestEmail(to) {
+  const line = 'This is a test from the Katana portal. If you can read it, email delivery is working.'
+  return send(to, {
+    subject: `Test email — ${SENDER_NAME}`,
+    text: `${line}\n\n— ${SENDER_NAME}`,
+    html: `<p style="font-family:'Segoe UI',Helvetica,Arial,sans-serif;font-size:14px;">${line}</p><p style="font-family:'Segoe UI',Helvetica,Arial,sans-serif;font-size:13px;color:#555;">— ${SENDER_NAME}</p>`,
+  })
+}
+
+async function send(to, msg) {
+  const t = await transport()
+  if (!t) return { delivered: false, reason: 'smtp_not_configured' }
   try {
-    const info = await transporter.sendMail({
-      from: FROM, to, replyTo: REPLY_TO, subject: msg.subject, text: msg.text, html: msg.html,
+    const info = await t.transporter.sendMail({
+      from: t.from, to, replyTo: t.replyTo, subject: msg.subject, text: msg.text, html: msg.html,
     })
     console.log(`[mailer] sent to ${to} — id ${info.messageId} — accepted ${JSON.stringify(info.accepted)} rejected ${JSON.stringify(info.rejected)} — ${info.response}`)
     const accepted = (info.accepted || []).map((a) => String(a).toLowerCase()).includes(to.toLowerCase())
@@ -77,4 +95,4 @@ export async function sendMagicLink({ to, name, link, role }) {
   }
 }
 
-export const smtpConfigured = hasSmtp
+export const smtpConfigured = async () => !!(await smtpConfig())

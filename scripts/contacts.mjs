@@ -17,7 +17,7 @@ export const CONTACTS = [
 
 Experience
 • IT Officer, University of Ghana Computing Systems (2017–2018): day-to-day IT operations, routers/switches/firewalls, support for 10,000+ users, IT policy, Active Directory, staff training.
-• Junior IT Officer, Akoa Beverages Ltd (2017–2021): first-line support, system monitoring, user documentation; credits himself with a 60% cut in security incidents.
+• Junior IT Officer, Akoa Beverages Ltd (2017–2021): first-line support, system monitoring, user documentation; claims a 60% cut in security incidents.
 • Projects: network optimisation (80% faster), cybersecurity strategy (70% fewer vulnerabilities), migration of 10 servers to a virtualised environment (60% lower hardware cost).
 
 Education & certifications
@@ -29,7 +29,7 @@ Strengths
 Wide hands-on infrastructure range — networking, virtualisation, directory services, backups and security basics — with experience supporting a large user base.
 
 Points to probe
-• The two roles overlap (2017–2018 vs 2017–2021), and the dates add up to about four years, not the 7+ claimed. Apart from the KNUST degree (2022–2024), what has he done since 2021?
+• The two roles overlap (2017–2018 vs 2017–2021), and the dates add up to about four years, not the 7+ claimed. Apart from the KNUST degree (2022–2024), what has Edwin done since 2021?
 • Two BSc IT degrees from different institutions — why the second?
 • The CV still contains a template placeholder (“[number] users”) and lists a certification under Professional Memberships — attention to detail.
 • The percentage claims (80%, 70%, 60%) — ask how each was measured.`,
@@ -60,7 +60,7 @@ The most clearly network-security-oriented profile in the group, with public-sec
 Points to probe
 • Whether the MSc (due August 2026) has been completed.
 • The gap between NITA (Aug 2020) and Prymage (Feb 2021).
-• What “99% uptime” covers and how it was measured; size of the client estate he looks after.
+• What “99% uptime” covers and how it was measured; size of the client estate George looks after.
 • No certifications listed — any vendor certs (Cisco, Fortinet, Microsoft)?`,
   },
   {
@@ -70,7 +70,7 @@ Points to probe
     category: 'Experienced Professional',
     discipline: 'Graduate Certificate in Information Technology', unit: null,
     institution: 'Algoma University, Canada', country: 'Ghana', canCommit: null,
-    cvSummary: `IT support analyst with a strong cybersecurity certification set; most of his career has been in administration.
+    cvSummary: `IT support analyst with a strong cybersecurity certification set; most of Henry’s career so far has been in administration.
 
 Experience
 • Surveillance Officer (IT & Systems Support), Enterprise Computing Ltd, Tema (Dec 2023–Jul 2024): monitored IT and surveillance systems across several sites, resolved Level 1–2 issues, handled real-time incidents, kept logs and asset records, escalated complex faults.
@@ -83,13 +83,13 @@ Education & certifications
 • Certified Ethical Hacker (EC-Council); Certified in Cybersecurity (ISC2); ISO/IEC 27001:2022 Lead Auditor.
 
 Strengths
-Security and governance credentials well beyond his years in hands-on IT — the ISO 27001 Lead Auditor certification points towards compliance and audit work. Clear writing about incident handling and user communication.
+Security and governance credentials well beyond Henry’s years in hands-on IT — the ISO 27001 Lead Auditor certification points towards compliance and audit work. Clear writing about incident handling and user communication.
 
 Points to probe
 • Direct IT experience is about eight months; the longer Electoral Commission role was administrative.
-• No role is listed after July 2024 (a gap of more than a year) — what has he been doing?
+• No role is listed after July 2024 (a gap of more than a year) — what has Henry been doing?
 • The Canadian certificate (2020–2023) ran alongside the Winneba role — studied remotely?
-• How the certifications have been applied in practice (any audits, assessments or security incidents he led).`,
+• How the certifications have been applied in practice (any audits, assessments or security incidents Henry led).`,
   },
   {
     slug: 'rowland-asorwoe', sheet: null, cv: 'rowland_asorwoe_cv.pdf',
@@ -117,8 +117,8 @@ Strengths
 The only software developer in the group, with a modern stack, security awareness and a record of teaching and mentoring — a good communicator on technical topics.
 
 Points to probe
-• No employed developer role so far; his development work comes from teaching and personal projects. Ask for repositories or live links.
-• The Manager role (Mar 2024–present) overlaps the second Statistical Service post — what is his current time commitment?
+• No employed developer role so far; Rowland’s development work comes from teaching and personal projects. Ask for repositories or live links.
+• The Manager role (Mar 2024–present) overlaps the second Statistical Service post — what is Rowland’s current time commitment?
 • Location is Ho — availability for on-site work in Accra.`,
   },
 ]

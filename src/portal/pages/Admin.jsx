@@ -1,23 +1,24 @@
 import { useEffect, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useSearchParams, Link } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import {
   Copy, Send, Trash2, Plus, Check, Link2, Mail, AlertTriangle, Target, Users2, MessageSquare,
-  ListChecks, ArrowUp, ArrowDown, Pencil, X,
+  ListChecks, ArrowUp, ArrowDown, Pencil, X, FileUp, Sparkles, RotateCw, KeyRound, Eye, EyeOff,
 } from 'lucide-react'
 import { api } from '../lib/api'
 import { Loader, StatusChip, STATUS_LABEL } from '../components/ui'
 
 const TABS = [
   { key: 'access', label: 'Access & Invites', icon: Users2 },
-  { key: 'questions', label: 'Interview Questions', icon: ListChecks },
+  { key: 'cohorts', label: 'Cohorts', icon: ListChecks },
   { key: 'feedback', label: 'Candidate Feedback', icon: MessageSquare },
   { key: 'settings', label: 'Settings', icon: Target },
 ]
 
 export default function Admin() {
   const [params, setParams] = useSearchParams()
-  const [tab, setTab] = useState(params.get('candidate') ? 'feedback' : TABS.some((t) => t.key === params.get('tab')) ? params.get('tab') : 'access')
+  const wanted = params.get('tab') === 'questions' ? 'cohorts' : params.get('tab') // old links
+  const [tab, setTab] = useState(params.get('candidate') ? 'feedback' : TABS.some((t) => t.key === wanted) ? wanted : 'access')
   const [overview, setOverview] = useState(null)
   const [dash, setDash] = useState(null)
   const [cohorts, setCohorts] = useState(null)
@@ -41,7 +42,7 @@ export default function Admin() {
         <div className="card card-pad" style={{ marginTop: '1.25rem', display: 'flex', gap: 12, alignItems: 'center', borderColor: 'rgba(224,192,96,0.4)' }}>
           <AlertTriangle size={18} style={{ color: 'var(--color-gold)' }} />
           <div style={{ fontSize: 12.5, color: 'var(--color-cream-muted)' }}>
-            <strong style={{ color: 'var(--color-cream)' }}>SMTP not configured.</strong> Magic links won’t auto-send yet — use “Copy link” below and share manually. Add SMTP creds to <code>.env</code> to enable email delivery.
+            <strong style={{ color: 'var(--color-cream)' }}>Email isn’t set up.</strong> Sign-in links won’t send yet — use “Copy link” below and share them yourself, or add your SMTP details under <button type="button" onClick={() => setTab('settings')} style={{ background: 'none', border: 'none', padding: 0, color: 'var(--color-gold)', cursor: 'pointer', font: 'inherit', textDecoration: 'underline' }}>Settings</button>.
           </div>
         </div>
       )}
@@ -55,9 +56,9 @@ export default function Admin() {
       </div>
 
       {tab === 'access' && <AccessTab overview={overview} reload={load} flash={flash} />}
-      {tab === 'questions' && <QuestionsTab data={cohorts} reload={reloadCohorts} flash={flash} />}
+      {tab === 'cohorts' && <CohortsTab data={cohorts} reload={reloadCohorts} reloadDash={reloadDash} flash={flash} />}
       {tab === 'feedback' && <FeedbackTab dash={dash} cohorts={cohorts.cohorts} reloadDash={() => { reloadDash(); reloadCohorts() }} initialSlug={params.get('candidate')} onSelect={(s) => setParams(s ? { candidate: s } : {})} flash={flash} />}
-      {tab === 'settings' && <SettingsTab overview={overview} flash={flash} />}
+      {tab === 'settings' && <SettingsTab flash={flash} reloadOverview={load} />}
 
       {toast && (
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
@@ -284,8 +285,8 @@ function FeedbackField({ label, value, onChange }) {
   )
 }
 
-/* ── Interview questions (per cohort) ──────────────────────────────────────── */
-function QuestionsTab({ data, reload, flash }) {
+/* ── Cohorts: role, weights, CVs, interview questions ──────────────────────────────────────── */
+function CohortsTab({ data, reload, reloadDash, flash }) {
   const { criteria, cohorts, scale } = data
   const [slug, setSlug] = useState(cohorts[0]?.slug || '')
   const [creating, setCreating] = useState(cohorts.length === 0)
@@ -300,7 +301,7 @@ function QuestionsTab({ data, reload, flash }) {
           <label>Cohort</label>
           <select value={slug} onChange={(e) => { setSlug(e.target.value); setCreating(false) }} style={{ width: '100%' }} disabled={!cohorts.length}>
             {!cohorts.length && <option value="">No cohorts yet</option>}
-            {cohorts.map((c) => <option key={c.slug} value={c.slug}>{c.name} · {c.candidates} candidate{c.candidates === 1 ? '' : 's'}</option>)}
+            {cohorts.map((c) => <option key={c.slug} value={c.slug}>{c.name}{c.role ? ` — ${c.role}` : ''} · {c.candidates} candidate{c.candidates === 1 ? '' : 's'}</option>)}
           </select>
         </div>
         {!creating && <button className="btn-ghost btn-sm" onClick={() => setCreating(true)}><Plus size={13} /> New cohort</button>}
@@ -311,6 +312,7 @@ function QuestionsTab({ data, reload, flash }) {
       {cohort && !creating && (
         <>
           <CohortSettings key={cohort.slug} cohort={cohort} criteria={criteria} reload={reload} flash={flash} />
+          <CvsCard key={`cv-${cohort.slug}`} cohort={cohort} onCandidates={() => { reload(); reloadDash() }} flash={flash} />
           <QuestionList key={`q-${cohort.slug}`} cohort={cohort} criteria={criteria} scale={scale} reloadCohorts={reload} flash={flash} />
         </>
       )}
@@ -320,19 +322,21 @@ function QuestionsTab({ data, reload, flash }) {
 
 function NewCohort({ cohorts, onCreated, onCancel, flash }) {
   const [name, setName] = useState('')
+  const [role, setRole] = useState('')
   const [copyFrom, setCopyFrom] = useState('')
   const [busy, setBusy] = useState(false)
   const create = async () => {
     if (!name.trim()) return
     setBusy(true)
-    try { const r = await api.admin.createCohort({ name: name.trim(), copyFrom: copyFrom || null }); flash('Cohort created'); await onCreated(r.slug) }
+    try { const r = await api.admin.createCohort({ name: name.trim(), role: role.trim(), copyFrom: copyFrom || null }); flash('Cohort created'); await onCreated(r.slug) }
     catch { flash('Could not create cohort') } finally { setBusy(false) }
   }
   return (
     <div className="card card-pad">
       <span className="card-title">New cohort</span>
-      <div className="grid grid-cols-1 sm:grid-cols-[1.4fr_1fr_auto_auto] gap-3 items-end" style={{ marginTop: 14 }}>
-        <div><label>Name</label><input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. January 2027" /></div>
+      <div className="grid grid-cols-1 sm:grid-cols-[1.2fr_1.2fr_1fr_auto_auto] gap-3 items-end" style={{ marginTop: 14 }}>
+        <div><label>Name</label><input type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. January 2027" /></div>
+        <div><label>Role being interviewed for</label><input type="text" value={role} onChange={(e) => setRole(e.target.value)} placeholder="e.g. IT Support Officer" /></div>
         <div>
           <label>Start from</label>
           <select value={copyFrom} onChange={(e) => setCopyFrom(e.target.value)} style={{ width: '100%' }}>
@@ -349,28 +353,32 @@ function NewCohort({ cohorts, onCreated, onCancel, flash }) {
 
 function CohortSettings({ cohort, criteria, reload, flash }) {
   const [name, setName] = useState(cohort.name)
+  const [role, setRole] = useState(cohort.role || '')
   const [weights, setWeights] = useState(() => Object.fromEntries(criteria.map((c) => [c.key, String(cohort.weights[c.key] ?? c.weight)])))
   const [busy, setBusy] = useState(false)
   const total = criteria.reduce((s, c) => s + (Number(weights[c.key]) || 0), 0)
-  const changed = name.trim() !== cohort.name || criteria.some((c) => Number(weights[c.key]) !== Number(cohort.weights[c.key] ?? c.weight))
+  const changed = name.trim() !== cohort.name || role.trim() !== (cohort.role || '') || criteria.some((c) => Number(weights[c.key]) !== Number(cohort.weights[c.key] ?? c.weight))
   const valid = name.trim() && criteria.every((c) => weights[c.key] !== '' && Number(weights[c.key]) >= 0 && Number(weights[c.key]) <= 100) && total > 0
 
   const save = async () => {
     setBusy(true)
     try {
-      await api.admin.updateCohort(cohort.slug, { name: name.trim(), weights: Object.fromEntries(criteria.map((c) => [c.key, Number(weights[c.key])])) })
+      await api.admin.updateCohort(cohort.slug, { name: name.trim(), role: role.trim(), weights: Object.fromEntries(criteria.map((c) => [c.key, Number(weights[c.key])])) })
       await reload(); flash('Cohort saved')
     } catch { flash('Could not save cohort') } finally { setBusy(false) }
   }
 
   return (
     <div className="card card-pad">
-      <span className="card-title"><Target size={13} style={{ verticalAlign: '-2px', marginRight: 6 }} />Cohort &amp; weights</span>
+      <span className="card-title"><Target size={13} style={{ verticalAlign: '-2px', marginRight: 6 }} />Cohort, role &amp; weights</span>
       <p style={{ fontSize: 12, color: 'var(--color-cream-muted)', margin: '8px 0 14px', lineHeight: 1.6 }}>
-        Weights are the points each dimension is worth in a candidate’s total. Changing them rescores everyone in this cohort.
+        The role shapes the AI’s CV summaries. Weights are the points each dimension is worth in a candidate’s total; changing them rescores everyone in this cohort.
       </p>
-      <div className="grid grid-cols-2 sm:grid-cols-[1.6fr_repeat(4,1fr)_auto] gap-3 items-end">
-        <div className="col-span-2 sm:col-span-1"><label>Cohort name</label><input value={name} onChange={(e) => setName(e.target.value)} /></div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3" style={{ marginBottom: 12 }}>
+        <div><label>Cohort name</label><input type="text" value={name} onChange={(e) => setName(e.target.value)} /></div>
+        <div><label>Role being interviewed for</label><input type="text" value={role} onChange={(e) => setRole(e.target.value)} placeholder="e.g. IT Support Officer" /></div>
+      </div>
+      <div className="grid grid-cols-2 sm:grid-cols-[repeat(4,1fr)_auto] gap-3 items-end">
         {criteria.map((c) => (
           <div key={c.key}>
             <label title={c.label}>{c.label}</label>
@@ -382,6 +390,133 @@ function CohortSettings({ cohort, criteria, reload, flash }) {
         </div>
       </div>
       <button className="btn-gold btn-sm" style={{ marginTop: 14 }} disabled={busy || !changed || !valid} onClick={save}>{busy ? 'Saving…' : 'Save cohort'}</button>
+    </div>
+  )
+}
+
+const MAX_CV_BYTES = 4 * 1024 * 1024
+const CV_STATUS = {
+  uploaded: { label: 'Waiting', color: 'var(--color-cream-muted)' },
+  processing: { label: 'Reading…', color: 'var(--color-gold)' },
+  done: { label: 'Done', color: 'var(--color-success)' },
+  error: { label: 'Failed', color: 'var(--color-error)' },
+}
+
+// Upload PDF CVs into the cohort, then have the AI read each one into a
+// candidate and their CV summary. One CV per request, run in turn.
+function CvsCard({ cohort, onCandidates, flash }) {
+  const [data, setData] = useState(null)
+  const [busy, setBusy] = useState('') // '' | 'upload' | 'run'
+  const [progress, setProgress] = useState('')
+  const [over, setOver] = useState(false)
+  const load = () => api.admin.cvs(cohort.slug).then(setData).catch(() => flash('Could not load CVs'))
+  useEffect(() => { api.admin.cvs(cohort.slug).then(setData).catch(() => {}) }, [cohort.slug])
+  if (!data) return <div className="card card-pad"><div className="spin" /></div>
+
+  const pending = data.files.filter((f) => f.status === 'uploaded' || f.status === 'error')
+
+  const addFiles = async (list) => {
+    const files = [...list]
+    const pdfs = files.filter((f) => f.type === 'application/pdf' || /\.pdf$/i.test(f.name))
+    const skipped = files.length - pdfs.length
+    setBusy('upload')
+    let ok = 0, tooBig = 0, failed = 0
+    for (const [i, f] of pdfs.entries()) {
+      setProgress(`Uploading ${i + 1} of ${pdfs.length}…`)
+      if (f.size > MAX_CV_BYTES) { tooBig++; continue }
+      try { await api.admin.uploadCv(cohort.slug, f); ok++ } catch { failed++ }
+    }
+    setBusy(''); setProgress('')
+    await load()
+    const notes = [ok && `${ok} uploaded`, skipped && `${skipped} not PDF`, tooBig && `${tooBig} over 4 MB`, failed && `${failed} failed`].filter(Boolean)
+    flash(notes.join(' · ') || 'Nothing uploaded')
+  }
+
+  const run = async (files) => {
+    setBusy('run')
+    let done = 0, failed = 0
+    for (const [i, f] of files.entries()) {
+      setProgress(`Reading ${i + 1} of ${files.length}: ${f.filename}`)
+      setData((d) => ({ ...d, files: d.files.map((x) => (x.id === f.id ? { ...x, status: 'processing', error: null } : x)) }))
+      try { await api.admin.processCv(f.id); done++ } catch { failed++ }
+      await load()
+    }
+    setBusy(''); setProgress('')
+    onCandidates()
+    flash(failed ? `${done} summarised · ${failed} failed` : `${done} CV${done === 1 ? '' : 's'} summarised`)
+  }
+
+  const remove = async (f) => {
+    if (!confirm(`Remove ${f.filename}?${f.candidate_name ? `\n\n${f.candidate_name} stays as a candidate.` : ''}`)) return
+    await api.admin.deleteCv(f.id); load()
+  }
+
+  return (
+    <div className="card">
+      <div className="card-pad card-hairline" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        <span className="card-title"><FileUp size={13} style={{ verticalAlign: '-2px', marginRight: 6 }} />CVs · {data.files.length}</span>
+        <span className="tag">{data.ai ? `AI: ${data.ai.provider} · ${data.ai.model}` : 'No AI provider set'}</span>
+      </div>
+      <div className="card-pad" style={{ display: 'grid', gap: 14 }}>
+        <label
+          onDragOver={(e) => { e.preventDefault(); setOver(true) }}
+          onDragLeave={() => setOver(false)}
+          onDrop={(e) => { e.preventDefault(); setOver(false); if (!busy) addFiles(e.dataTransfer.files) }}
+          style={{
+            display: 'grid', placeItems: 'center', gap: 6, padding: '1.6rem 1rem', cursor: busy ? 'default' : 'pointer', textAlign: 'center',
+            border: `1px dashed ${over ? 'var(--color-gold)' : 'var(--color-border-green)'}`, borderRadius: 'var(--radius-sm)',
+            background: over ? 'var(--color-gold-faint)' : 'transparent', textTransform: 'none', letterSpacing: 0, margin: 0,
+          }}>
+          <FileUp size={20} style={{ color: 'var(--color-gold)' }} />
+          <span style={{ fontSize: 13, color: 'var(--color-cream)' }}>Drop PDF CVs here, or click to choose</span>
+          <span style={{ fontSize: 11, color: 'var(--color-cream-muted)' }}>PDF only, up to 4 MB each. Several at once is fine.</span>
+          <input type="file" accept="application/pdf,.pdf" multiple disabled={!!busy} style={{ display: 'none' }}
+            onChange={(e) => { addFiles(e.target.files); e.target.value = '' }} />
+        </label>
+
+        {!data.ai && (
+          <p style={{ fontSize: 12, color: 'var(--color-gold)' }}>
+            To generate summaries, add an AI provider and API key under <strong>Admin → Settings</strong>.
+          </p>
+        )}
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          <button className="btn-gold btn-sm" disabled={!!busy || !data.ai || !pending.length} onClick={() => run(pending)}>
+            <Sparkles size={13} /> Generate summaries{pending.length ? ` (${pending.length})` : ''}
+          </button>
+          {progress && <span style={{ fontSize: 12, color: 'var(--color-cream-muted)' }}><span className="spin" style={{ width: 12, height: 12, display: 'inline-block', verticalAlign: '-2px', marginRight: 8, borderWidth: 2 }} />{progress}</span>}
+          {!progress && <span style={{ fontSize: 11, color: 'var(--color-cream-muted)' }}>Each CV becomes a candidate in this cohort (or updates the candidate with the same email), with a panel-only summary written for the role. Takes up to a minute per CV.</span>}
+        </div>
+
+        {data.files.length > 0 && (
+          <div style={{ display: 'grid', gap: 8 }}>
+            {data.files.map((f) => {
+              const st = CV_STATUS[f.status] || CV_STATUS.uploaded
+              return (
+                <div key={f.id} style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', borderLeft: '2px solid var(--color-border-green)', paddingLeft: 12 }}>
+                  <div style={{ flex: '1 1 260px', minWidth: 0 }}>
+                    <a href={`/api/cvs/${f.id}/file`} target="_blank" rel="noreferrer" style={{ fontSize: 13, color: 'var(--color-cream)' }} className="break-all">{f.filename}</a>
+                    <span style={{ fontSize: 11, color: 'var(--color-cream-muted)', marginLeft: 8 }}>{Math.max(1, Math.round(f.size_bytes / 1024))} KB</span>
+                    <div style={{ fontSize: 11.5, marginTop: 2, color: st.color }}>
+                      {st.label}
+                      {f.status === 'done' && f.candidate_slug && <> → <Link to={`/portal/candidate/${f.candidate_slug}`} style={{ color: 'var(--color-gold)' }}>{f.candidate_name || 'candidate'}</Link></>}
+                      {f.status === 'error' && f.error && <span style={{ color: 'var(--color-cream-muted)' }}> — {f.error}</span>}
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
+                    {f.status !== 'processing' && (
+                      <button className="btn-ghost btn-sm" disabled={!!busy || !data.ai} onClick={() => run([f])} title={f.status === 'done' ? 'Re-read this CV (rewrites the summary)' : 'Read this CV'}>
+                        <RotateCw size={12} />
+                      </button>
+                    )}
+                    <button className="btn-ghost btn-sm" disabled={!!busy} onClick={() => remove(f)} title="Remove file" style={{ borderColor: 'rgba(232,92,92,0.3)' }}><Trash2 size={12} style={{ color: 'var(--color-error)' }} /></button>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </div>
     </div>
   )
 }
@@ -502,9 +637,166 @@ function AddQuestion({ cohort, criterionKey, placeholder, onAdded, flash }) {
 }
 
 /* ── Settings ──────────────────────────────────────────────────────────────── */
-function SettingsTab({ overview }) {
+function SettingsTab({ flash, reloadOverview }) {
+  const [data, setData] = useState(null)
+  const load = () => api.admin.integrations().then(setData).catch(() => flash('Could not load settings'))
+  useEffect(() => { api.admin.integrations().then(setData).catch(() => {}) }, [])
+  if (!data) return <div className="card card-pad"><div className="spin" /></div>
+  const saved = async () => { await load(); reloadOverview() }
   return (
-    <div className="card card-pad" style={{ maxWidth: 620 }}>
+    <div style={{ display: 'grid', gap: '1.25rem', maxWidth: 820 }}>
+      <SmtpCard smtp={data.smtp} onSaved={saved} flash={flash} />
+      <AiCard ai={data.ai} onSaved={saved} flash={flash} />
+      <CutoffNote />
+    </div>
+  )
+}
+
+const SourceNote = ({ source, what }) => (
+  <p style={{ fontSize: 12, color: source === 'none' ? 'var(--color-gold)' : 'var(--color-cream-muted)', margin: '8px 0 14px', lineHeight: 1.6 }}>
+    {source === 'settings' && <>Using the {what} saved here.</>}
+    {source === 'env' && <>Using the server’s environment variables. Saving here overrides them.</>}
+    {source === 'none' && <>Not set up yet.</>}
+  </p>
+)
+
+function SmtpCard({ smtp, onSaved, flash }) {
+  const [f, setF] = useState({ host: smtp.host, port: String(smtp.port || 587), secure: smtp.secure, user: smtp.user, password: '', from: smtp.from, replyTo: smtp.replyTo })
+  const [busy, setBusy] = useState('')
+  const set = (patch) => setF((x) => ({ ...x, ...patch }))
+  const valid = f.host.trim() && Number.isInteger(Number(f.port)) && Number(f.port) > 0
+
+  const save = async () => {
+    setBusy('save')
+    try { await api.admin.saveSmtp({ ...f, port: Number(f.port) }); set({ password: '' }); await onSaved(); flash('Email settings saved') }
+    catch { flash('Could not save email settings') } finally { setBusy('') }
+  }
+  const test = async () => {
+    setBusy('test')
+    try {
+      const r = await api.admin.testSmtp()
+      flash(r.delivered ? `Test email sent to ${r.to}` : r.reason === 'smtp_not_configured' ? 'Save the settings first' : `Send failed: ${r.error || 'rejected'}`)
+    } catch { flash('Test failed') } finally { setBusy('') }
+  }
+  const revert = async () => {
+    if (!confirm('Remove the email settings saved here? The server’s environment variables (if any) will be used instead.')) return
+    await api.admin.saveSmtp({ clear: true }); await onSaved(); flash('Email settings removed')
+  }
+
+  return (
+    <div className="card card-pad">
+      <span className="card-title"><Mail size={13} style={{ verticalAlign: '-2px', marginRight: 6 }} />Email (SMTP)</span>
+      <SourceNote source={smtp.source} what="email settings" />
+      <div className="grid grid-cols-1 sm:grid-cols-[2fr_1fr_1.2fr] gap-3">
+        <div><label>SMTP host</label><input type="text" value={f.host} onChange={(e) => set({ host: e.target.value })} placeholder="smtp.gmail.com" /></div>
+        <div><label>Port</label><input type="number" value={f.port} onChange={(e) => set({ port: e.target.value })} /></div>
+        <div>
+          <label>Security</label>
+          <select value={f.secure ? 'ssl' : 'starttls'} onChange={(e) => set({ secure: e.target.value === 'ssl', port: e.target.value === 'ssl' ? '465' : '587' })}>
+            <option value="starttls">STARTTLS (port 587)</option>
+            <option value="ssl">SSL/TLS (port 465)</option>
+          </select>
+        </div>
+        <div><label>Username</label><input type="text" value={f.user} onChange={(e) => set({ user: e.target.value })} autoComplete="off" /></div>
+        <div className="sm:col-span-2">
+          <label>Password / app password</label>
+          <input type="password" value={f.password} onChange={(e) => set({ password: e.target.value })} autoComplete="new-password"
+            placeholder={smtp.passwordSet ? 'Saved — leave blank to keep' : ''} />
+        </div>
+        <div><label>From address</label><input type="email" value={f.from} onChange={(e) => set({ from: e.target.value })} placeholder="hr@ninanigroup.com" /></div>
+        <div className="sm:col-span-2"><label>Reply-to (optional)</label><input type="email" value={f.replyTo} onChange={(e) => set({ replyTo: e.target.value })} /></div>
+      </div>
+      <p style={{ fontSize: 11, color: 'var(--color-cream-muted)', marginTop: 10 }}>Emails always show the sender name “Ninani Group HR”. For Gmail, use an app password.</p>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 14 }}>
+        <button className="btn-gold btn-sm" disabled={!!busy || !valid} onClick={save}>{busy === 'save' ? 'Saving…' : 'Save'}</button>
+        <button className="btn-ghost btn-sm" disabled={!!busy || smtp.source === 'none'} onClick={test}><Send size={12} /> {busy === 'test' ? 'Sending…' : 'Send test email to me'}</button>
+        {smtp.source === 'settings' && <button className="btn-ghost btn-sm" disabled={!!busy} onClick={revert}>Remove saved settings</button>}
+      </div>
+    </div>
+  )
+}
+
+function AiCard({ ai, onSaved, flash }) {
+  const [provider, setProvider] = useState(ai.provider)
+  const p = ai.providers.find((x) => x.key === provider)
+  const [key, setKey] = useState('')
+  const [show, setShow] = useState(false)
+  const [models, setModels] = useState({}) // provider -> model ids from the last test
+  const [model, setModel] = useState(p?.model || '')
+  const [busy, setBusy] = useState('')
+
+  const pick = (k) => { setProvider(k); setKey(''); setModel(ai.providers.find((x) => x.key === k)?.model || '') }
+  const test = async () => {
+    setBusy('test')
+    try {
+      const r = await api.admin.testAi({ provider, apiKey: key })
+      setModels((m) => ({ ...m, [provider]: r.models }))
+      if (!model && r.models.length) setModel(r.models[0])
+      flash(`Key works · ${r.models.length} models available`)
+    } catch (e) { flash(e.message || 'Test failed') } finally { setBusy('') }
+  }
+  const save = async () => {
+    setBusy('save')
+    try { await api.admin.saveAi({ provider, model, apiKey: key }); setKey(''); await onSaved(); flash(`${p.label} saved and in use`) }
+    catch { flash('Could not save') } finally { setBusy('') }
+  }
+  const removeKey = async () => {
+    if (!confirm(`Remove the saved ${p.label} key?`)) return
+    await api.admin.saveAi({ provider, removeKey: true }); await onSaved(); flash('Key removed')
+  }
+  const list = models[provider] || []
+  const hasKey = !!(key.trim() || p?.keyMask)
+
+  return (
+    <div className="card card-pad">
+      <span className="card-title"><KeyRound size={13} style={{ verticalAlign: '-2px', marginRight: 6 }} />AI for CV summaries</span>
+      <p style={{ fontSize: 12, color: ai.source === 'none' ? 'var(--color-gold)' : 'var(--color-cream-muted)', margin: '8px 0 14px', lineHeight: 1.6 }}>
+        {ai.source === 'none' ? 'Not set up yet: add a key below to generate CV summaries.'
+          : <>In use: <strong style={{ color: 'var(--color-cream)' }}>{ai.providers.find((x) => x.key === ai.provider)?.label} · {ai.model}</strong>{ai.source === 'env' ? ' (from the server’s environment)' : ''}.</>}
+      </p>
+      <div className="grid grid-cols-1 sm:grid-cols-[1fr_1.4fr] gap-3">
+        <div>
+          <label>Provider</label>
+          <select value={provider} onChange={(e) => pick(e.target.value)}>
+            {ai.providers.map((x) => <option key={x.key} value={x.key}>{x.label}{x.keyMask ? ' · key saved' : ''}</option>)}
+          </select>
+        </div>
+        <div>
+          <label>API key</label>
+          <div style={{ display: 'flex', gap: 6 }}>
+            <input type={show ? 'text' : 'password'} value={key} onChange={(e) => setKey(e.target.value)} autoComplete="new-password"
+              placeholder={p?.keyMask ? `${p.keyMask} saved${p.keyFromEnv ? ' (env)' : ''} — leave blank to keep` : p?.keyHint} />
+            <button type="button" className="btn-ghost btn-sm" onClick={() => setShow((s) => !s)} title={show ? 'Hide' : 'Show'}>{show ? <EyeOff size={12} /> : <Eye size={12} />}</button>
+          </div>
+        </div>
+        <div className="sm:col-span-2">
+          <label>Model</label>
+          {list.length ? (
+            <select value={model} onChange={(e) => setModel(e.target.value)}>
+              {!list.includes(model) && model && <option value={model}>{model}</option>}
+              {list.map((m) => <option key={m} value={m}>{m}</option>)}
+            </select>
+          ) : (
+            <input type="text" value={model} onChange={(e) => setModel(e.target.value)} placeholder={p?.defaultModel || 'Click “Test key” to load the available models'} />
+          )}
+        </div>
+      </div>
+      <p style={{ fontSize: 11, color: 'var(--color-cream-muted)', marginTop: 10, lineHeight: 1.6 }}>
+        {p?.readsPdf ? `${p.label} reads the PDF itself, layout included.` : `${p?.label} is sent the text extracted from each PDF; scanned (image-only) CVs can’t be read this way.`}
+        {' '}CVs are sent to the selected provider to be summarised. Keys are stored encrypted and never shown again.
+      </p>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 14 }}>
+        <button className="btn-ghost btn-sm" disabled={!!busy || !hasKey} onClick={test}>{busy === 'test' ? 'Testing…' : 'Test key'}</button>
+        <button className="btn-gold btn-sm" disabled={!!busy || !hasKey || !model.trim()} onClick={save}>{busy === 'save' ? 'Saving…' : 'Save & use this provider'}</button>
+        {p?.keyMask && !p.keyFromEnv && <button className="btn-ghost btn-sm" disabled={!!busy} onClick={removeKey}>Remove key</button>}
+      </div>
+    </div>
+  )
+}
+
+function CutoffNote() {
+  return (
+    <div className="card card-pad">
       <span className="card-title"><Target size={13} style={{ verticalAlign: '-2px', marginRight: 6 }} />Selection &amp; Cutoff</span>
       <p style={{ fontSize: 13, color: 'var(--color-cream-muted)', margin: '12px 0 16px', lineHeight: 1.7 }}>
         Selection is driven by each candidate’s <strong style={{ color: 'var(--color-cream)' }}>Decision Status</strong>, not a fixed
@@ -515,12 +807,6 @@ function SettingsTab({ overview }) {
         To move a candidate above or below the cutoff, open <strong style={{ color: 'var(--color-cream)' }}>Candidate Feedback</strong>,
         pick the candidate, and change their <strong style={{ color: 'var(--color-cream)' }}>Decision Status</strong>.
       </p>
-      <div style={{ marginTop: 18, paddingTop: 16, borderTop: '1px solid var(--color-border-green)', display: 'flex', alignItems: 'center', gap: 10 }}>
-        <span style={{ width: 8, height: 8, borderRadius: '50%', background: overview.smtpConfigured ? 'var(--color-success)' : 'var(--color-gold)' }} />
-        <span style={{ fontSize: 12.5, color: 'var(--color-cream-muted)' }}>
-          Email delivery: <strong style={{ color: 'var(--color-cream)' }}>{overview.smtpConfigured ? 'SMTP configured — links send automatically' : 'Not configured — use Copy link'}</strong>
-        </span>
-      </div>
     </div>
   )
 }

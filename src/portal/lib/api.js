@@ -8,9 +8,27 @@ async function req(path, { method = 'GET', body } = {}) {
   })
   const data = await res.json().catch(() => ({}))
   if (!res.ok) {
-    const err = new Error(data?.error || `HTTP ${res.status}`)
+    const err = new Error(data?.message || data?.error || `HTTP ${res.status}`)
     err.status = res.status
     err.code = data?.error
+    throw err
+  }
+  return data
+}
+
+// A file sent as the raw request body (PDF CVs); the name goes in X-Filename.
+async function upload(path, file) {
+  const res = await fetch(`/api${path}`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': file.type || 'application/pdf', 'X-Filename': encodeURIComponent(file.name) },
+    body: file,
+  })
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) {
+    const err = new Error(data?.error || `HTTP ${res.status}`)
+    err.status = res.status
+    err.code = data?.error || (res.status === 413 ? 'too_large' : undefined)
     throw err
   }
   return data
@@ -45,5 +63,14 @@ export const api = {
     updateQuestion: (id, payload) => req(`/admin/questions/${id}`, { method: 'PATCH', body: payload }),
     deleteQuestion: (id) => req(`/admin/questions/${id}`, { method: 'DELETE' }),
     orderQuestions: (cohort, ids) => req(`/admin/cohorts/${cohort}/questions/order`, { method: 'POST', body: { ids } }),
+    cvs: (cohort) => req(`/admin/cohorts/${cohort}/cvs`),
+    uploadCv: (cohort, file) => upload(`/admin/cohorts/${cohort}/cvs`, file),
+    processCv: (id) => req(`/admin/cvs/${id}/process`, { method: 'POST' }),
+    deleteCv: (id) => req(`/admin/cvs/${id}`, { method: 'DELETE' }),
+    integrations: () => req('/admin/integrations'),
+    saveSmtp: (payload) => req('/admin/integrations/smtp', { method: 'PUT', body: payload }),
+    testSmtp: () => req('/admin/integrations/smtp/test', { method: 'POST' }),
+    saveAi: (payload) => req('/admin/integrations/ai', { method: 'PUT', body: payload }),
+    testAi: (payload) => req('/admin/integrations/ai/test', { method: 'POST', body: payload }),
   },
 }

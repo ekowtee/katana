@@ -135,6 +135,9 @@ create table if not exists cohorts (
   created_at  timestamptz not null default now()
 );
 
+-- The role this cohort is being interviewed for (shapes the CV summaries).
+alter table cohorts add column if not exists role text;
+
 create table if not exists cohort_criteria (
   cohort_slug   text not null references cohorts(slug) on delete cascade,
   criterion_key text not null references criteria(key) on delete cascade,
@@ -168,6 +171,33 @@ create table if not exists question_scores (
 -- per candidate); rows imported from a scoring workbook have none.
 alter table panel_comments add column if not exists account_id uuid references accounts(id) on delete cascade;
 create unique index if not exists panel_comments_account_uniq on panel_comments (candidate_slug, account_id);
+
+-- ── CVs uploaded per cohort; Claude reads each one into a candidate + summary ─
+-- status: 'uploaded' → 'processing' → 'done' | 'error'
+create table if not exists cv_files (
+  id             bigserial primary key,
+  cohort_slug    text not null references cohorts(slug) on delete cascade,
+  filename       text not null,
+  content_type   text not null,
+  size_bytes     int not null,
+  data           bytea not null,
+  status         text not null default 'uploaded',
+  error          text,
+  candidate_slug text references candidates(slug) on delete set null,
+  uploaded_by    uuid references accounts(id) on delete set null,
+  created_at     timestamptz not null default now(),
+  processed_at   timestamptz
+);
+create index if not exists cv_files_cohort_idx on cv_files (cohort_slug, created_at);
+
+-- ── Integration settings entered in Admin → Settings ('smtp', 'ai') ─────────
+-- Passwords / API keys inside `config` are encrypted (see server/settings.mjs).
+create table if not exists integration_settings (
+  area        text primary key,
+  config      jsonb not null default '{}',
+  updated_at  timestamptz not null default now(),
+  updated_by  uuid references accounts(id) on delete set null
+);
 
 -- ── updated_at trigger ──────────────────────────────────────────────────────
 create or replace function touch_updated_at() returns trigger as $$

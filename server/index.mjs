@@ -9,6 +9,8 @@ import {
 import { sendMagicLink, smtpConfigured } from './mailer.mjs'
 import { terranovaSso } from './sso.mjs'
 import { assessmentRoutes, recomputeCandidate, rankCohort } from './assessment.mjs'
+import { cvRoutes } from './cv-ingest.mjs'
+import { settingsRoutes } from './settings-routes.mjs'
 
 const app = express()
 app.use(express.json())
@@ -51,6 +53,9 @@ app.use(terranovaSso())
 
 // Cohorts, interview questions and per-question panel scoring (see server/assessment.mjs).
 app.use(assessmentRoutes())
+// CV upload + AI summaries per cohort, and the SMTP / AI settings behind them.
+app.use(cvRoutes())
+app.use(settingsRoutes())
 
 app.get('/api/auth/me', async (req, res) => {
   const acc = await currentAccount(req)
@@ -126,7 +131,9 @@ app.get('/api/candidates/:slug', requireAuth('panel', 'admin'), async (req, res)
   const max = await one(
     `select coalesce((select sum(weight) from cohort_criteria where cohort_slug = $1),
                      (select sum(weight) from criteria)) as points`, [c.cohort_slug])
-  res.json({ candidate: c, scores, comments, feedback, maxPoints: Number(max.points) })
+  const cohort = c.cohort_slug ? await one(`select slug, name, role from cohorts where slug = $1`, [c.cohort_slug]) : null
+  const cv = await one(`select id, filename from cv_files where candidate_slug = $1 order by created_at desc limit 1`, [c.slug])
+  res.json({ candidate: c, scores, comments, feedback, maxPoints: Number(max.points), cohort, cvFile: cv })
 })
 
 // ════════════════════════════════════════════════════════════════════════
@@ -162,7 +169,7 @@ app.get('/api/admin/overview', admin, async (req, res) => {
            a.active, a.last_login_at
       from accounts a order by a.role, a.display_name`)
   const settings = await one(`select cutoff_rank from app_settings where id = 1`)
-  res.json({ accounts, smtpConfigured, cutoffRank: settings?.cutoff_rank ?? 10 })
+  res.json({ accounts, smtpConfigured: await smtpConfigured(), cutoffRank: settings?.cutoff_rank ?? 10 })
 })
 
 app.patch('/api/admin/settings', admin, async (req, res) => {
@@ -272,7 +279,7 @@ app.patch('/api/admin/candidates/:slug', admin, async (req, res) => {
 // instead and never call listen.
 if (!process.env.VERCEL) {
   const PORT = Number(process.env.PORT || 8787)
-  app.listen(PORT, () => console.log(`▶ DATJF portal API on http://localhost:${PORT}  (SMTP: ${smtpConfigured ? 'on' : 'off'})`))
+  app.listen(PORT, () => console.log(`▶ DATJF portal API on http://localhost:${PORT}`))
 }
 
 export default app
