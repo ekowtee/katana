@@ -1,46 +1,62 @@
 import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
-import { Sparkles, Quote as MessageSquareQuote } from 'lucide-react'
+import { Sparkles, Quote as MessageSquareQuote, CalendarDays, MapPin, FileText } from 'lucide-react'
 import { api } from '../lib/api'
 import { Loader, critShort } from '../components/ui'
 import { Brand } from '../components/ui'
 
 const OUTCOME = {
-  selected: { title: 'Congratulations — you’ve been selected', tone: '#6FD08C', blurb: 'The panel was impressed by your interview. Welcome to The Ninani Group Fellowship.' },
-  reserve: { title: 'You’ve been placed on our reserve & training track', tone: '#E0C060', blurb: 'The panel saw real promise in you. We’d love to keep developing your talent through our academy and future cohorts.' },
+  selected: { title: 'Congratulations — you’ve been selected', tone: '#6FD08C', blurb: 'The panel was impressed by your interview. Welcome to The Ninani Group.' },
+  reserve: { title: 'You’ve been placed on our reserve list', tone: '#E0C060', blurb: 'The panel saw real promise in you. We’d like to keep in touch about this and future opportunities.' },
   discuss: { title: 'Thank you — your application is under final review', tone: '#7EC8E3', blurb: 'Your interview stood out. We’re finalising a few details and will be in touch shortly.' },
-  not_selected: { title: 'Thank you for interviewing with us', tone: '#E88B8B', blurb: 'While you weren’t selected for this cohort, the panel valued your time and encourages you to stay connected.' },
+  not_selected: { title: 'Thank you for interviewing with us', tone: '#E88B8B', blurb: 'While you weren’t selected this time, the panel valued your time and encourages you to stay connected.' },
   not_assessed: { title: 'Thank you for your interest', tone: '#A7B0A8', blurb: 'We were unable to complete your assessment in this round.' },
-  review: { title: 'Your application is being reviewed', tone: '#A7B0A8', blurb: 'Thank you for your submission. We’ll share an update soon.' },
+  review: { title: 'Your application is being reviewed', tone: '#A7B0A8', blurb: 'Thank you for your interest. We’ll let you know by email as soon as the panel has reached its decision.' },
 }
+
+const fmtWhen = (iso) => new Intl.DateTimeFormat('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' }).format(new Date(iso))
 
 export default function MyResults() {
   const [d, setD] = useState(null)
   const [err, setErr] = useState('')
 
-  useEffect(() => { api.myResults().then(setD).catch(() => setErr('Could not load your results.')) }, [])
+  useEffect(() => { api.myResults().then(setD).catch(() => setErr('Could not load your page.')) }, [])
 
   if (err) return <p style={{ color: 'var(--color-error)' }}>{err}</p>
-  if (!d) return <Loader label="Loading your feedback" />
+  if (!d) return <Loader label="Loading" />
 
   const c = d.candidate
-  const outcome = OUTCOME[c.status] || OUTCOME.review
+  const outcome = d.released ? (OUTCOME[c.status] || OUTCOME.review) : OUTCOME.review
   const overall = d.feedback.find((f) => !f.criterion_key)
   const perCriterion = d.feedback.filter((f) => f.criterion_key)
   const scoreByCrit = Object.fromEntries(d.scores.map((s) => [s.criterion_key, s]))
+  const upcoming = c.interview_at && new Date(c.interview_at) > new Date(Date.now() - 3 * 3600_000)
 
   return (
     <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }}>
-      {/* Hero outcome */}
+      {/* Hero */}
       <div className="card card-pad" style={{ overflow: 'hidden', position: 'relative' }}>
         <div style={{ position: 'absolute', inset: 0, background: `radial-gradient(600px 240px at 100% 0%, ${outcome.tone}14, transparent 70%)`, pointerEvents: 'none' }} />
-        <p className="portal-eyebrow" style={{ color: outcome.tone }}>The Ninani Group Fellowship</p>
+        <p className="portal-eyebrow" style={{ color: outcome.tone }}>The Ninani Group{d.cohort?.role ? ` · ${d.cohort.role}` : ''}</p>
         <h1 className="portal-h1" style={{ maxWidth: '22ch' }}>{outcome.title}</h1>
         <p className="portal-lede">{outcome.blurb}</p>
         <p style={{ marginTop: 14, fontSize: 13, color: 'var(--color-cream-muted)' }}>
-          Dear <strong style={{ color: 'var(--color-cream)' }}>{c.name}</strong>, below is the personalised feedback from your interview panel.
+          Dear <strong style={{ color: 'var(--color-cream)' }}>{c.name}</strong>,{' '}
+          {d.released ? 'below is the personalised feedback from your interview panel.' : 'thank you for applying. This page will show your interview details, and later your outcome and the panel’s feedback.'}
         </p>
       </div>
+
+      {/* Interview slot */}
+      {c.interview_at && (
+        <div className="card card-pad" style={{ marginTop: '1.25rem' }}>
+          <span className="card-title"><CalendarDays size={13} style={{ verticalAlign: '-2px', marginRight: 6 }} />{upcoming && !d.released ? 'Your interview' : 'Interview'}</span>
+          <div style={{ display: 'grid', gap: 8, marginTop: 14, fontSize: 13.5, color: 'var(--color-cream)' }}>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}><CalendarDays size={13} style={{ color: 'var(--color-gold-muted)' }} />{fmtWhen(c.interview_at)} · {c.interview_minutes || 45} minutes</div>
+            {c.interview_location && <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}><MapPin size={13} style={{ color: 'var(--color-gold-muted)' }} />{c.interview_location}</div>}
+          </div>
+          {upcoming && !d.released && <p style={{ fontSize: 12, color: 'var(--color-cream-muted)', marginTop: 12 }}>Times are shown in your device’s time zone. If you can’t make it, reply to your invitation email as soon as possible.</p>}
+        </div>
+      )}
 
       {/* Overall feedback */}
       {overall?.body && (
@@ -74,11 +90,19 @@ export default function MyResults() {
         </div>
       )}
 
-      {!overall?.body && perCriterion.length === 0 && (
+      {d.released && !overall?.body && perCriterion.length === 0 && (
         <div className="card card-pad" style={{ marginTop: '1.25rem' }}>
           <p style={{ color: 'var(--color-cream-muted)', fontSize: 13 }}>
             Your detailed feedback is being finalised by the panel and will appear here shortly.
           </p>
+        </div>
+      )}
+
+      {/* CV summary (without the panel's points to probe) */}
+      {d.cvSummary && (
+        <div className="card card-pad" style={{ marginTop: '1.25rem' }}>
+          <span className="card-title"><FileText size={13} style={{ verticalAlign: '-2px', marginRight: 6 }} />How the panel read your CV</span>
+          <p className="prose" style={{ marginTop: 14 }}>{d.cvSummary}</p>
         </div>
       )}
 

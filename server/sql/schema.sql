@@ -137,6 +137,22 @@ create table if not exists cohorts (
 
 -- The role this cohort is being interviewed for (shapes the CV summaries).
 alter table cohorts add column if not exists role text;
+-- Default venue / meeting link for the cohort's interviews (candidates can override).
+alter table cohorts add column if not exists interview_location text;
+-- "Closing the gate": once closed, scoring is locked and candidates can see
+-- their outcome, feedback and CV summary. Reopening clears these.
+alter table cohorts add column if not exists closed_at timestamptz;
+alter table cohorts add column if not exists closed_by uuid references accounts(id) on delete set null;
+
+-- Interview slot per candidate, sent to the panel (and optionally the
+-- candidate) as a calendar invitation. interview_sequence is the iCalendar
+-- SEQUENCE: it goes up on every (re)send so calendars treat it as an update.
+alter table candidates add column if not exists interview_at timestamptz;
+alter table candidates add column if not exists interview_minutes int not null default 45;
+alter table candidates add column if not exists interview_location text;
+alter table candidates add column if not exists interview_sequence int not null default 0;
+alter table candidates add column if not exists invites_sent_at timestamptz;
+alter table candidates add column if not exists result_sent_at timestamptz;
 
 create table if not exists cohort_criteria (
   cohort_slug   text not null references cohorts(slug) on delete cascade,
@@ -166,6 +182,11 @@ create table if not exists questions (
   created_at    timestamptz not null default now()
 );
 create index if not exists questions_cohort_idx on questions (cohort_slug, criterion_key, sort_order);
+-- guidance: what a strong answer looks like (shown to the panel under the
+-- question, e.g. a RiteVizor rubric anchor). source: 'manual' | 'ritevizor'.
+alter table questions add column if not exists guidance text;
+alter table questions add column if not exists source text not null default 'manual';
+alter table questions add column if not exists created_by uuid references accounts(id) on delete set null;
 
 -- One score (1–5) per question, per candidate, per panel member.
 create table if not exists question_scores (
@@ -215,7 +236,7 @@ create table if not exists registrations (
 );
 create unique index if not exists registrations_email_uniq on registrations (lower(email));
 
--- ── Integration settings entered in Admin → Settings ('smtp', 'ai') ─────────
+-- ── Integration settings entered in Admin → Settings ('smtp', 'ai', 'ritevizor')
 -- Passwords / API keys inside `config` are encrypted (see server/settings.mjs).
 create table if not exists integration_settings (
   area        text primary key,
@@ -223,6 +244,25 @@ create table if not exists integration_settings (
   updated_at  timestamptz not null default now(),
   updated_by  uuid references accounts(id) on delete set null
 );
+
+-- Panel members draft candidate feedback too; who last edited each section.
+alter table candidate_feedback add column if not exists updated_by uuid references accounts(id) on delete set null;
+
+-- ── Emails sent by the portal: interview invitations and results ───────────
+create table if not exists notifications (
+  id             bigserial primary key,
+  kind           text not null,                 -- 'interview_invite' | 'interview_cancel' | 'results'
+  cohort_slug    text references cohorts(slug) on delete cascade,
+  candidate_slug text references candidates(slug) on delete cascade,
+  account_id     uuid references accounts(id) on delete set null,  -- staff recipient, for invites
+  recipient      text not null,
+  subject        text,
+  delivered      boolean not null default false,
+  error          text,
+  sent_by        uuid references accounts(id) on delete set null,
+  created_at     timestamptz not null default now()
+);
+create index if not exists notifications_cohort_idx on notifications (cohort_slug, created_at);
 
 -- ── updated_at trigger ──────────────────────────────────────────────────────
 create or replace function touch_updated_at() returns trigger as $$

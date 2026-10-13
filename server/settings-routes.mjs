@@ -4,6 +4,7 @@ import { PROVIDERS, aiConfig, decrypt, encrypt, mask, readArea, smtpConfig, writ
 import { sendTestEmail } from './mailer.mjs'
 import { listModels } from './ai.mjs'
 import { query } from './db.mjs'
+import { DEFAULT_URL as RITEVIZOR_DEFAULT_URL, listRubrics, ritevizorConfig } from './ritevizor.mjs'
 
 // Admin → Settings: SMTP and AI provider settings. Secrets go in, never out:
 // responses only say whether one is saved, plus its last four characters.
@@ -15,7 +16,14 @@ export function settingsRoutes() {
     const smtp = await smtpConfig()
     const saved = await readArea('ai')
     const active = await aiConfig()
+    const rv = await ritevizorConfig()
+    const rvSaved = await readArea('ritevizor')
     res.json({
+      ritevizor: {
+        source: rv?.source || 'none',
+        url: rv?.url || rvSaved.url || RITEVIZOR_DEFAULT_URL,
+        keyMask: mask(rv?.apiKey), keyFromEnv: rv?.source === 'env',
+      },
       smtp: smtp
         ? { source: smtp.source, host: smtp.host, port: smtp.port, secure: smtp.secure, user: smtp.user,
             from: smtp.from, replyTo: smtp.replyTo, passwordSet: !!smtp.pass }
@@ -76,6 +84,32 @@ export function settingsRoutes() {
     if (typeof b.model === 'string') models[b.provider] = b.model.trim()
     await writeArea('ai', { provider: b.provider, models, keys_enc: keys }, req.account.id)
     res.json({ ok: true })
+  })
+
+  // RiteVizor rubric library: base URL + API key (matches KATANA_API_KEY there).
+  r.put('/api/admin/integrations/ritevizor', admin, async (req, res) => {
+    const b = req.body || {}
+    const prev = await readArea('ritevizor')
+    if (b.removeKey) { await writeArea('ritevizor', { url: prev.url || null, key_enc: null }, req.account.id); return res.json({ ok: true }) }
+    let url = String(b.url || '').trim().replace(/\/+$/, '')
+    if (url) { try { const u = new URL(url); if (!/^https?:$/.test(u.protocol)) throw new Error() ; url = u.origin + u.pathname.replace(/\/+$/, '') } catch { return res.status(400).json({ error: 'bad_url', message: 'Enter the RiteVizor API address, e.g. https://api.ritevizor.com' }) } }
+    const apiKey = typeof b.apiKey === 'string' && b.apiKey.trim() ? b.apiKey.trim() : null
+    await writeArea('ritevizor', { url: url || null, key_enc: apiKey ? encrypt(apiKey) : prev.key_enc || null }, req.account.id)
+    res.json({ ok: true })
+  })
+
+  r.post('/api/admin/integrations/ritevizor/test', admin, async (req, res) => {
+    const b = req.body || {}
+    const saved = await readArea('ritevizor')
+    const key = (typeof b.apiKey === 'string' && b.apiKey.trim()) || decrypt(saved.key_enc) || process.env.RITEVIZOR_API_KEY
+    if (!key) return res.status(400).json({ error: 'no_key', message: 'Enter the API key first.' })
+    const url = (String(b.url || '').trim() || saved.url || process.env.RITEVIZOR_API_URL || RITEVIZOR_DEFAULT_URL).replace(/\/+$/, '')
+    try {
+      const rubrics = await listRubrics({ url, apiKey: key })
+      res.json({ ok: true, count: rubrics.length, names: rubrics.slice(0, 8).map((x) => x.name) })
+    } catch (e) {
+      res.status(400).json({ error: 'test_failed', message: e.safe ? e.message : 'The test failed.' })
+    }
   })
 
   // Check a key (the one typed, or the saved one) by listing the provider's models.

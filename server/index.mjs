@@ -8,10 +8,12 @@ import {
 } from './auth.mjs'
 import { sendMagicLink, smtpConfigured } from './mailer.mjs'
 import { terranovaSso } from './sso.mjs'
-import { assessmentRoutes, recomputeCandidate, rankCohort, myCohorts, mayView } from './assessment.mjs'
+import { assessmentRoutes, recomputeCandidate, rankCohort, myCohorts, mayView, onPanel } from './assessment.mjs'
 import { cvRoutes } from './cv-ingest.mjs'
 import { settingsRoutes } from './settings-routes.mjs'
 import { registrationRoutes } from './registrations.mjs'
+import { interviewRoutes } from './interviews.mjs'
+import { ritevizorRoutes } from './ritevizor.mjs'
 
 const app = express()
 app.use(express.json())
@@ -59,6 +61,9 @@ app.use(cvRoutes())
 app.use(settingsRoutes())
 // Launch-page RSVPs.
 app.use(registrationRoutes())
+// Interview scheduling, closing a cohort with result emails; RiteVizor rubric import.
+app.use(interviewRoutes())
+app.use(ritevizorRoutes())
 
 app.get('/api/auth/me', async (req, res) => {
   const acc = await currentAccount(req)
@@ -79,7 +84,7 @@ app.get('/api/auth/me', async (req, res) => {
 // the selection cutoff falls cleanly below the selected group.
 const candidateRows = (where, params) => many(`
   select slug, name, category, rank, interview_day, total_50, score_pct, status, scored,
-         recommendations_summary, panel_reading, cohort_slug
+         recommendations_summary, panel_reading, cohort_slug, interview_at, interview_location, email
     from candidates ${where}
    order by case status
               when 'selected' then 0 when 'discuss' then 1 when 'reserve' then 2
@@ -154,23 +159,83 @@ app.get('/api/candidates/:slug', requireAuth('panel', 'admin'), async (req, res)
 // ════════════════════════════════════════════════════════════════════════
 //  CANDIDATE SELF VIEW  (candidate — curated, approved feedback only)
 // ════════════════════════════════════════════════════════════════════════
+// The candidate sees their interview slot at any time; their outcome, approved
+// feedback, scores and CV summary only once the cohort is closed ("released").
+// The CV summary's "Points to probe" section is written for the panel and is
+// left out. Candidates with no cohort (legacy) see everything, as before.
+const stripPointsToProbe = (summary) => {
+  if (!summary) return null
+  const i = summary.search(/^\s*Points to probe\s*$/im)
+  return (i >= 0 ? summary.slice(0, i) : summary).trim() || null
+}
+
 app.get('/api/me', requireAuth('candidate'), async (req, res) => {
   const slug = req.account.candidate_slug
   if (!slug) return res.status(404).json({ error: 'no_candidate' })
   const c = await one(`
-    select slug, name, category, discipline, institution, status, score_pct, rank,
-           why_fellowship, career_ambitions, personal_statement, capstone, scored
-      from candidates where slug = $1`, [slug])
-  const scores = await many(`
+    select c.slug, c.name, c.category, c.discipline, c.institution, c.status, c.score_pct, c.rank,
+           c.why_fellowship, c.career_ambitions, c.personal_statement, c.capstone, c.scored, c.cv_summary,
+           c.interview_at, c.interview_minutes, coalesce(c.interview_location, co.interview_location) as interview_location,
+           c.cohort_slug, co.name as cohort_name, co.role as cohort_role, co.closed_at
+      from candidates c left join cohorts co on co.slug = c.cohort_slug where c.slug = $1`, [slug])
+  if (!c) return res.status(404).json({ error: 'no_candidate' })
+  const released = !c.cohort_slug || !!c.closed_at
+  const { cv_summary, closed_at, cohort_slug, cohort_name, cohort_role, ...candidate } = c
+  const scores = released ? await many(`
     select s.criterion_key, cr.label, coalesce(cc.weight, cr.weight) as weight, s.avg_norm
       from scores s join criteria cr on cr.key = s.criterion_key
       join candidates c on c.slug = s.candidate_slug
       left join cohort_criteria cc on cc.cohort_slug = c.cohort_slug and cc.criterion_key = s.criterion_key
-     where s.candidate_slug = $1 order by cr.sort_order`, [slug])
-  const feedback = await many(`
+     where s.candidate_slug = $1 order by cr.sort_order`, [slug]) : []
+  const feedback = released ? await many(`
     select criterion_key, body from candidate_feedback
-     where candidate_slug = $1 and approved and body <> '' order by criterion_key nulls first`, [slug])
-  res.json({ candidate: c, scores, feedback })
+     where candidate_slug = $1 and approved and body <> '' order by criterion_key nulls first`, [slug]) : []
+  res.json({
+    candidate: released ? candidate : { ...candidate, status: 'review', score_pct: null, rank: null, scored: false },
+    cohort: cohort_slug ? { name: cohort_name, role: cohort_role, closedAt: closed_at } : null,
+    released,
+    scores, feedback,
+    cvSummary: released ? stripPointsToProbe(cv_summary) : null,
+  })
+})
+
+// ── Candidate-facing feedback: drafted by the panel, approved by an admin ──
+// Panel members on the cohort's panel may write the unapproved sections;
+// only admins approve, or change a section once it's approved.
+app.get('/api/candidates/:slug/feedback', requireAuth('panel', 'admin'), async (req, res) => {
+  const c = await one(`select slug, cohort_slug from candidates where slug = $1`, [req.params.slug])
+  if (!c) return res.status(404).json({ error: 'not_found' })
+  if (!(await mayView(req.account, c.cohort_slug))) return res.status(403).json({ error: 'not_on_panel' })
+  const rows = await many(`
+    select f.criterion_key, f.body, f.approved, f.updated_at,
+           (select coalesce(a.display_name, a.email) from accounts a where a.id = f.updated_by) as updated_by_name
+      from candidate_feedback f where f.candidate_slug = $1`, [c.slug])
+  const criteria = await many(`select key, label from criteria order by sort_order`)
+  const canEdit = req.account.role === 'admin' || (await onPanel(req.account.id, c.cohort_slug))
+  res.json({ feedback: rows, criteria, canEdit, canApprove: req.account.role === 'admin' })
+})
+
+app.put('/api/candidates/:slug/feedback', requireAuth('panel', 'admin'), async (req, res) => {
+  const c = await one(`select slug, cohort_slug from candidates where slug = $1`, [req.params.slug])
+  if (!c) return res.status(404).json({ error: 'not_found' })
+  const isAdmin = req.account.role === 'admin'
+  if (!isAdmin && !(await onPanel(req.account.id, c.cohort_slug))) return res.status(403).json({ error: 'not_on_panel' })
+  const items = Array.isArray(req.body?.items) ? req.body.items : []
+  const current = Object.fromEntries((await many(`select criterion_key, approved from candidate_feedback where candidate_slug = $1`, [c.slug])).map((f) => [f.criterion_key || '', f.approved]))
+  for (const it of items) {
+    const key = it.criterionKey || null
+    const wasApproved = !!current[key || '']
+    if (!isAdmin && wasApproved) continue // published text is the admin's to change
+    const approved = isAdmin ? !!it.approved : wasApproved
+    await one(
+      `insert into candidate_feedback (candidate_slug, criterion_key, body, approved, updated_by)
+       values ($1,$2,$3,$4,$5)
+       on conflict (candidate_slug, coalesce(criterion_key, ''))
+       do update set body = excluded.body, approved = excluded.approved, updated_by = excluded.updated_by, updated_at = now()
+       returning id`,
+      [c.slug, key, it.body || '', approved, req.account.id])
+  }
+  res.json({ ok: true })
 })
 
 // ════════════════════════════════════════════════════════════════════════
@@ -265,12 +330,12 @@ app.put('/api/admin/feedback/:slug', admin, async (req, res) => {
   for (const it of items) {
     const key = it.criterionKey || null
     await one(
-      `insert into candidate_feedback (candidate_slug, criterion_key, body, approved)
-       values ($1,$2,$3,$4)
+      `insert into candidate_feedback (candidate_slug, criterion_key, body, approved, updated_by)
+       values ($1,$2,$3,$4,$5)
        on conflict (candidate_slug, coalesce(criterion_key, ''))
-       do update set body = excluded.body, approved = excluded.approved, updated_at = now()
+       do update set body = excluded.body, approved = excluded.approved, updated_by = excluded.updated_by, updated_at = now()
        returning id`,
-      [req.params.slug, key, it.body || '', !!it.approved]
+      [req.params.slug, key, it.body || '', !!it.approved, req.account.id]
     )
   }
   res.json({ ok: true })

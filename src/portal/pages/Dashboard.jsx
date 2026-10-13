@@ -75,7 +75,12 @@ export default function Dashboard() {
     <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 16, flexWrap: 'wrap' }}>
         <div>
-          <p className="portal-eyebrow">{cohort.name}{cohort.role ? ` · ${cohort.role}` : ''}</p>
+          <p className="portal-eyebrow">
+            {cohort.name}{cohort.role ? ` · ${cohort.role}` : ''}
+            {cohort.closed_at
+              ? <span className="chip chip-selected" style={{ marginLeft: 10, verticalAlign: '1px' }}><span className="dot" />Closed · results released</span>
+              : <span className="chip chip-review" style={{ marginLeft: 10, verticalAlign: '1px' }}><span className="dot" />Interviewing</span>}
+          </p>
           <h1 className="portal-h1">Selection <span className="accent">Dashboard</span></h1>
         </div>
         {cohorts.length > 1 && (
@@ -185,7 +190,9 @@ export default function Dashboard() {
               <tr>
                 <th style={{ width: 56 }}>Rank</th>
                 <th>Candidate</th>
+                <th className="hidden md:table-cell" style={{ width: 170 }}>Interview</th>
                 <th className="w-[80px] md:w-[150px]">Score</th>
+                <th className="hidden md:table-cell" style={{ width: 120 }}>Votes</th>
                 <th className="w-[100px] md:w-[150px]">Status</th>
               </tr>
             </thead>
@@ -206,7 +213,7 @@ function GroupBlock({ group, showCutoffBefore, onClick }) {
   return (
     <>
       {showCutoffBefore && (
-        <tr className="cutoff-row"><td colSpan={4}>
+        <tr className="cutoff-row"><td colSpan={6}>
           <div className="cutoff-line">
             <span className="lbl">Selection Cutoff</span>
             <span className="line" />
@@ -214,7 +221,7 @@ function GroupBlock({ group, showCutoffBefore, onClick }) {
         </td></tr>
       )}
       <tr className="group-head">
-        <td colSpan={4}>
+        <td colSpan={6}>
           <span style={{ width: 7, height: 7, borderRadius: '50%', background: STATUS_COLOR[group.status], display: 'inline-block', marginRight: 8 }} />
           {GROUP_LABEL[group.status]} <span style={{ opacity: 0.5 }}>· {group.rows.length}</span>
         </td>
@@ -226,6 +233,9 @@ function GroupBlock({ group, showCutoffBefore, onClick }) {
             <div style={{ fontWeight: 500, color: 'var(--color-cream)' }}>{c.name}</div>
             <div style={{ fontSize: 11, color: 'var(--color-cream-muted)' }}>{c.category}</div>
           </td>
+          <td className="hidden md:table-cell" style={{ fontSize: 11.5, color: c.interview_at ? 'var(--color-cream)' : 'var(--color-cream-muted)', whiteSpace: 'nowrap' }}>
+            {c.interview_at ? new Intl.DateTimeFormat('en-GB', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }).format(new Date(c.interview_at)) : 'Not scheduled'}
+          </td>
           <td>
             {c.score_pct != null ? (
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -233,6 +243,9 @@ function GroupBlock({ group, showCutoffBefore, onClick }) {
                 <span style={{ fontSize: 12, color: 'var(--color-gold)', minWidth: 50 }}>{Number(c.total_50).toFixed(1)} · {fmtPct(c.score_pct)}</span>
               </div>
             ) : <span style={{ color: 'var(--color-cream-muted)', fontSize: 12 }}>—</span>}
+          </td>
+          <td className="hidden md:table-cell" style={{ fontSize: 11.5, color: 'var(--color-cream-muted)', whiteSpace: 'nowrap' }} title="Panel recommendations: SR strongly recommend · R recommend · RL reserve list · DNR do not recommend">
+            {c.recommendations_summary || '—'}
           </td>
           <td><StatusChip status={c.status} /></td>
         </tr>

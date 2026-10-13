@@ -52,6 +52,11 @@ SMTP_SECURE    = false
 SMTP_USER      = tools@interactivedigital.com.gh
 SMTP_PASSWORD  = <app password>
 SMTP_FROM      = hr@interactivedigital.com.gh   # sender name is always "Ninani Group HR"
+
+# Optional fallbacks — the admin normally enters these under Admin → Settings instead:
+ANTHROPIC_API_KEY   = <key>                               # AI provider for CV summaries
+RITEVIZOR_API_URL   = https://rite-vizor-api.vercel.app   # RiteVizor API (api.ritevizor.com once that DNS exists)
+RITEVIZOR_API_KEY   = <same value as KATANA_API_KEY on the rite-vizor-api Vercel project>
 ```
 
 `NODE_ENV=production` is set by Vercel automatically (this makes the session cookie

@@ -7,6 +7,7 @@ import { StatusChip, Loader, fmtPct, critShort } from '../components/ui'
 import { useAuth } from '../lib/AuthContext'
 
 const REC_CLASS = { SR: 'chip-selected', R: 'chip-discuss', RL: 'chip-reserve', DNR: 'chip-not_selected', NA: 'chip-review', OTHER: 'chip-review' }
+const fmtWhen = (iso) => new Intl.DateTimeFormat('en-GB', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }).format(new Date(iso))
 
 export default function CandidateDetail() {
   const { slug } = useParams()
@@ -52,7 +53,9 @@ export default function CandidateDetail() {
                 <StatusChip status={c.status} />
                 {d.cohort && <span className="tag" style={{ color: 'var(--color-gold-muted)' }}>{d.cohort.name}{d.cohort.role ? ` · ${d.cohort.role}` : ''}</span>}
                 {c.category && <span className="tag">{c.category}</span>}
-                {c.interview_day && <span className="tag"><CalendarDays size={10} style={{ verticalAlign: '-1px', marginRight: 4 }} />{c.interview_day}</span>}
+                {c.interview_at
+                  ? <span className="tag"><CalendarDays size={10} style={{ verticalAlign: '-1px', marginRight: 4 }} />{fmtWhen(c.interview_at)}{c.interview_location ? ` · ${c.interview_location}` : d.cohort?.interview_location ? ` · ${d.cohort.interview_location}` : ''}</span>
+                  : c.interview_day && <span className="tag"><CalendarDays size={10} style={{ verticalAlign: '-1px', marginRight: 4 }} />{c.interview_day}</span>}
               </div>
             </div>
           </div>
@@ -141,40 +144,8 @@ export default function CandidateDetail() {
           )}
         </div>
 
-        {/* Curated Feedback (Visible to Candidate) */}
-        <div className="card card-pad">
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span className="card-title">Curated Feedback to Candidate</span>
-            <span className="tag" style={{ color: 'var(--color-gold)' }}>Candidate View</span>
-          </div>
-          <div style={{ display: 'grid', gap: 14, marginTop: 16 }}>
-            {d.feedback.length === 0 && <p style={{ fontSize: 12, color: 'var(--color-cream-muted)' }}>No curated feedback drafted yet.</p>}
-            {d.feedback.map((f, i) => {
-              const label = f.criterion_key ? (d.scores.find(s => s.criterion_key === f.criterion_key)?.label || f.criterion_key) : 'Overall Summary'
-              return (
-                <div key={i} style={{ borderLeft: '2px solid var(--color-gold-faint)', paddingLeft: 12 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 4 }}>
-                    <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-gold)' }}>{critShort(label)}</span>
-                    <span className={`chip ${f.approved ? 'chip-selected' : 'chip-review'}`}>
-                      <span className="dot" />
-                      {f.approved ? 'Published' : 'Draft'}
-                    </span>
-                  </div>
-                  {f.body ? (
-                    <p className="prose" style={{ fontSize: 12.5, marginTop: 4 }}>{f.body}</p>
-                  ) : (
-                    <p style={{ fontSize: 12.5, color: 'var(--color-cream-muted)', fontStyle: 'italic', marginTop: 4 }}>No feedback text entered.</p>
-                  )}
-                </div>
-              )
-            })}
-          </div>
-          {account?.role === 'admin' && (
-            <Link to={`/portal/admin?candidate=${c.slug}`} className="btn-ghost btn-sm" style={{ marginTop: 16, display: 'inline-flex' }}>
-              Edit feedback in Admin tab →
-            </Link>
-          )}
-        </div>
+        {/* Feedback to the candidate: drafted by the panel, published by an admin */}
+        <FeedbackCard slug={c.slug} />
       </div>
 
       {/* Submission */}
@@ -217,11 +188,19 @@ function AssessmentCard({ slug, isAdmin, onSaved }) {
     }).catch(() => setMsg('Could not load the assessment.'))
   }, [slug])
 
+  const reloadAssessment = () => api.assessment(slug).then((r) => setA(r)).catch(() => {})
+
   if (!a) return msg ? <p style={{ color: 'var(--color-error)', marginTop: '1.25rem' }}>{msg}</p> : null
 
   const all = a.dimensions.flatMap((d) => d.questions)
   const done = all.filter((q) => scores[q.id] != null).length
-  const pick = (id, n) => { setScores((s) => ({ ...s, [id]: s[id] === n ? null : n })); setDirty(true); setMsg('') }
+  const closed = !!a.cohort?.closed
+  const readOnly = !a.canScore
+  const pick = (id, n) => { if (readOnly) return; setScores((s) => ({ ...s, [id]: s[id] === n ? null : n })); setDirty(true); setMsg('') }
+  const removeQuestion = async (q) => {
+    if (!confirm('Delete this question? Only questions you added, that nobody has scored, can be deleted.')) return
+    try { await api.deleteQuestion(q.id); await reloadAssessment() } catch (e) { setMsg(e.message || 'Could not delete the question.') }
+  }
 
   const save = async () => {
     setSaving(true); setMsg('')
@@ -241,7 +220,12 @@ function AssessmentCard({ slug, isAdmin, onSaved }) {
         <span className="tag">{a.cohort ? `${a.cohort.name} · ` : ''}{done} of {all.length} scored</span>
       </div>
 
-      {a.cohort && !a.canScore ? (
+      {a.cohort && closed && (
+        <p style={{ fontSize: 12.5, color: 'var(--color-gold)', marginTop: 14 }}>
+          {a.cohort.name} is closed: results have been released and scores are final.
+        </p>
+      )}
+      {a.cohort && !closed && readOnly ? (
         <p style={{ fontSize: 12.5, color: 'var(--color-cream-muted)', marginTop: 14 }}>
           You’re not on the interview panel for {a.cohort.name}, so you can’t score this candidate.
           {isAdmin && <> Add yourself under <Link to="/portal/admin?tab=cohorts" style={{ color: 'var(--color-gold)' }}>Admin → Cohorts → Interview panel</Link>.</>}
@@ -253,9 +237,11 @@ function AssessmentCard({ slug, isAdmin, onSaved }) {
         </p>
       ) : (
         <>
-          <p style={{ fontSize: 12, color: 'var(--color-cream-muted)', marginTop: 8 }}>
-            Score each question from 1 (weak) to {a.scale} (excellent). Click a selected score again to clear it. Only you see your scores; the panel sees the average.
-          </p>
+          {!readOnly && (
+            <p style={{ fontSize: 12, color: 'var(--color-cream-muted)', marginTop: 8 }}>
+              Score each question from 1 (weak) to {a.scale} (excellent). Click a selected score again to clear it. Only you see your scores; the panel sees the average.
+            </p>
+          )}
           <div style={{ display: 'grid', gap: 22, marginTop: 18 }}>
             {a.dimensions.map((dim) => (
               <div key={dim.key}>
@@ -266,24 +252,36 @@ function AssessmentCard({ slug, isAdmin, onSaved }) {
                 {dim.questions.length === 0 && (
                   <p style={{ fontSize: 12, color: 'var(--color-cream-muted)', fontStyle: 'italic' }}>
                     No questions set for this dimension yet.
-                    {isAdmin && <> Add them in <Link to="/portal/admin?tab=cohorts" style={{ color: 'var(--color-gold)' }}>Admin → Cohorts</Link>.</>}
+                    {isAdmin && <> Add them in <Link to="/portal/admin?tab=cohorts" style={{ color: 'var(--color-gold)' }}>Admin → Cohorts</Link>, or below.</>}
                   </p>
                 )}
                 <div style={{ display: 'grid', gap: 10 }}>
                   {dim.questions.map((q, i) => (
                     <div key={q.id} style={{ display: 'flex', gap: 12, alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap' }}>
-                      <p style={{ fontSize: 13, color: 'var(--color-cream)', lineHeight: 1.6, flex: '1 1 260px', margin: 0 }}>
-                        <span style={{ color: 'var(--color-gold-muted)', marginRight: 6 }}>{i + 1}.</span>{q.body}
-                      </p>
+                      <div style={{ flex: '1 1 260px', minWidth: 0 }}>
+                        <p style={{ fontSize: 13, color: 'var(--color-cream)', lineHeight: 1.6, margin: 0 }}>
+                          <span style={{ color: 'var(--color-gold-muted)', marginRight: 6 }}>{i + 1}.</span>{q.body}
+                          {q.source === 'ritevizor' && <span className="tag" style={{ marginLeft: 8 }}>RiteVizor</span>}
+                        </p>
+                        {q.guidance && <Guidance text={q.guidance} />}
+                        {q.mine && a.canAddQuestions && (
+                          <button type="button" onClick={() => removeQuestion(q)} style={{ background: 'none', border: 'none', padding: 0, marginTop: 4, fontSize: 10.5, color: 'var(--color-cream-muted)', cursor: 'pointer', textDecoration: 'underline' }}>
+                            You added this · delete
+                          </button>
+                        )}
+                      </div>
                       <div className="score-pills" role="group" aria-label={`Score for question ${i + 1}`}>
                         {Array.from({ length: a.scale }, (_, k) => k + 1).map((n) => (
-                          <button key={n} type="button" className={`score-pill ${scores[q.id] === n ? 'on' : ''}`}
-                            aria-pressed={scores[q.id] === n} onClick={() => pick(q.id, n)}>{n}</button>
+                          <button key={n} type="button" className={`score-pill ${scores[q.id] === n ? 'on' : ''}`} disabled={readOnly}
+                            aria-pressed={scores[q.id] === n} onClick={() => pick(q.id, n)} style={readOnly ? { cursor: 'default', opacity: scores[q.id] === n ? 1 : 0.45 } : undefined}>{n}</button>
                         ))}
                       </div>
                     </div>
                   ))}
                 </div>
+                {a.canAddQuestions && dim.key !== 'appearance' && (
+                  <AddQuestionInline cohort={a.cohort.slug} criterionKey={dim.key} label={dim.label} onAdded={reloadAssessment} />
+                )}
               </div>
             ))}
           </div>
@@ -303,12 +301,129 @@ function AssessmentCard({ slug, isAdmin, onSaved }) {
             </div>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 14 }}>
-            <button className="btn-gold" onClick={save} disabled={saving || !dirty}>{saving ? 'Saving…' : 'Save assessment'}</button>
-            {msg && <span style={{ fontSize: 12, color: msg === 'Saved' ? 'var(--color-success)' : 'var(--color-error)' }}>{msg}</span>}
-            {!msg && dirty && <span style={{ fontSize: 12, color: 'var(--color-cream-muted)' }}>Unsaved changes</span>}
-          </div>
+          {!readOnly && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 14 }}>
+              <button className="btn-gold" onClick={save} disabled={saving || !dirty}>{saving ? 'Saving…' : 'Save assessment'}</button>
+              {msg && <span style={{ fontSize: 12, color: msg === 'Saved' ? 'var(--color-success)' : 'var(--color-error)' }}>{msg}</span>}
+              {!msg && dirty && <span style={{ fontSize: 12, color: 'var(--color-cream-muted)' }}>Unsaved changes</span>}
+            </div>
+          )}
+          {readOnly && msg && <p style={{ fontSize: 12, color: 'var(--color-error)', marginTop: 10 }}>{msg}</p>}
         </>
+      )}
+    </div>
+  )
+}
+
+// "What good looks like" under a question (a RiteVizor anchor, or notes the author added).
+function Guidance({ text }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div style={{ marginTop: 4 }}>
+      <button type="button" onClick={() => setOpen((o) => !o)} style={{ background: 'none', border: 'none', padding: 0, fontSize: 11, color: 'var(--color-gold)', cursor: 'pointer' }}>
+        {open ? '▾' : '▸'} What a strong answer shows
+      </button>
+      {open && <p className="prose" style={{ fontSize: 12, marginTop: 6, paddingLeft: 10, borderLeft: '2px solid var(--color-gold-faint)' }}>{text}</p>}
+    </div>
+  )
+}
+
+// Panel members can add a question from the interview itself.
+function AddQuestionInline({ cohort, criterionKey, label, onAdded }) {
+  const [open, setOpen] = useState(false)
+  const [body, setBody] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  if (!open) {
+    return <button type="button" className="btn-ghost btn-sm" style={{ marginTop: 10 }} onClick={() => setOpen(true)}>+ Add a {label.toLowerCase()} question</button>
+  }
+  const add = async () => {
+    if (!body.trim()) return
+    setBusy(true); setErr('')
+    try { await api.addQuestion(cohort, { criterionKey, body: body.trim() }); setBody(''); setOpen(false); await onAdded() }
+    catch (e) { setErr(e.message || 'Could not add the question.') } finally { setBusy(false) }
+  }
+  return (
+    <div style={{ marginTop: 10, display: 'grid', gap: 8 }}>
+      <textarea className="portal-input" value={body} onChange={(e) => setBody(e.target.value)} placeholder={`A ${label.toLowerCase()} question for every candidate in this cohort…`} style={{ minHeight: 56 }} autoFocus />
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+        <button type="button" className="btn-gold btn-sm" disabled={busy || !body.trim()} onClick={add}>{busy ? 'Adding…' : 'Add question'}</button>
+        <button type="button" className="btn-ghost btn-sm" onClick={() => { setOpen(false); setBody(''); setErr('') }}>Cancel</button>
+        <span style={{ fontSize: 11, color: err ? 'var(--color-error)' : 'var(--color-cream-muted)' }}>{err || 'It’s added for the whole cohort; you can delete it until someone scores it.'}</span>
+      </div>
+    </div>
+  )
+}
+
+// Feedback the candidate will see: panel members draft it, an admin approves
+// and publishes each section. Published text can only be changed by an admin.
+function FeedbackCard({ slug }) {
+  const [d, setD] = useState(null)
+  const [items, setItems] = useState({})
+  const [dirty, setDirty] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [msg, setMsg] = useState('')
+  const load = () => api.feedback(slug).then((r) => {
+    setD(r)
+    const map = {}
+    r.feedback.forEach((f) => { map[f.criterion_key || ''] = { body: f.body, approved: f.approved, by: f.updated_by_name, at: f.updated_at } })
+    setItems(map); setDirty(false)
+  }).catch(() => setMsg('Could not load the feedback.'))
+  useEffect(() => { load() }, [slug]) // eslint-disable-line react-hooks/exhaustive-deps
+  if (!d) return <div className="card card-pad">{msg ? <p style={{ color: 'var(--color-error)', fontSize: 12 }}>{msg}</p> : <div className="spin" />}</div>
+
+  const sections = [{ key: '', label: 'Overall note to candidate' }, ...d.criteria.map((c) => ({ key: c.key, label: c.label }))]
+  const set = (key, patch) => { setItems((m) => ({ ...m, [key]: { body: '', approved: false, ...m[key], ...patch } })); setDirty(true); setMsg('') }
+  const save = async () => {
+    setSaving(true); setMsg('')
+    try {
+      await api.saveFeedback(slug, sections.map((s) => ({ criterionKey: s.key || null, body: items[s.key]?.body || '', approved: !!items[s.key]?.approved })))
+      await load(); setMsg('Saved')
+    } catch (e) { setMsg(e.message || 'Could not save.') } finally { setSaving(false) }
+  }
+
+  return (
+    <div className="card card-pad">
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        <span className="card-title">Feedback to Candidate</span>
+        <span className="tag" style={{ color: 'var(--color-gold)' }}>{d.canApprove ? 'You publish' : 'Draft · an admin publishes'}</span>
+      </div>
+      <p style={{ fontSize: 11, color: 'var(--color-cream-muted)', marginTop: 6, lineHeight: 1.6 }}>
+        Written for the candidate; they see only <strong>published</strong> sections, once their cohort is closed. Your panel notes above are never shared.
+      </p>
+      <div style={{ display: 'grid', gap: 14, marginTop: 14 }}>
+        {sections.map((s) => {
+          const v = items[s.key] || { body: '', approved: false }
+          const locked = v.approved && !d.canApprove
+          return (
+            <div key={s.key}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-gold)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>{critShort(s.label)}</span>
+                {d.canApprove ? (
+                  <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, margin: 0, cursor: 'pointer', color: v.approved ? 'var(--color-success)' : 'var(--color-cream-muted)', textTransform: 'none', letterSpacing: 0 }}>
+                    <input type="checkbox" checked={!!v.approved} onChange={(e) => set(s.key, { approved: e.target.checked })} style={{ width: 14, height: 14 }} />
+                    <span style={{ fontSize: 10 }}>Approve &amp; publish</span>
+                  </label>
+                ) : (
+                  <span className={`chip ${v.approved ? 'chip-selected' : 'chip-review'}`}><span className="dot" />{v.approved ? 'Published' : 'Draft'}</span>
+                )}
+              </div>
+              {d.canEdit && !locked ? (
+                <textarea className="portal-input" value={v.body} onChange={(e) => set(s.key, { body: e.target.value })} placeholder={`What the candidate should hear about “${critShort(s.label)}”…`} style={{ minHeight: 64 }} />
+              ) : (
+                v.body ? <p className="prose" style={{ fontSize: 12.5 }}>{v.body}</p> : <p style={{ fontSize: 12, color: 'var(--color-cream-muted)', fontStyle: 'italic' }}>Nothing written yet.</p>
+              )}
+              {v.by && <p style={{ fontSize: 10.5, color: 'var(--color-cream-muted)', marginTop: 3 }}>Last edited by {v.by}</p>}
+            </div>
+          )
+        })}
+      </div>
+      {d.canEdit && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 14 }}>
+          <button className="btn-gold btn-sm" onClick={save} disabled={saving || !dirty}>{saving ? 'Saving…' : 'Save feedback'}</button>
+          {msg && <span style={{ fontSize: 12, color: msg === 'Saved' ? 'var(--color-success)' : 'var(--color-error)' }}>{msg}</span>}
+          {!msg && dirty && <span style={{ fontSize: 12, color: 'var(--color-cream-muted)' }}>Unsaved changes</span>}
+        </div>
       )}
     </div>
   )

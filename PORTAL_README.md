@@ -1,134 +1,126 @@
-# The Ninani Group Fellowship — Selection Portal
+# Katana — Interview Portal (developer notes)
 
-A premium, branded microsite for the First Cohort interview panel to review aggregate
-scores & rankings, plus a magic-link experience for candidates to receive curated feedback.
+The Ninani Group's interview portal: cohorts of applicants go from CV to decision.
+Administrators set a cohort up, CVs are summarised by an AI provider for the panel,
+interviews are scheduled with calendar invitations, panel members score every candidate
+against the cohort's questions, and closing the cohort emails each candidate their outcome
+and releases the panel's feedback to them.
 
-Built on top of the existing launch site (the public RSVP landing at `/` is untouched).
+For how to *use* it, see [USER-GUIDE.md](USER-GUIDE.md). For hosting, see
+[DEPLOY-VERCEL.md](DEPLOY-VERCEL.md).
 
 ---
 
 ## Architecture
 
 ```
-Browser SPA (React + Vite, port 5173)
-   │  /api/*  ──proxy──▶  Express API (port 8787)
-   │                          │
-   │                          ▼
-   └───────────────────  PostgreSQL 18  (db: datjf_portal, local :5432)
+Browser SPA (React + Vite)            ─ src/portal/
+   │  /api/*  ──▶  Express API          ─ server/  (one Vercel function: api/index.mjs)
+   │                  │
+   │                  ├─▶ PostgreSQL (Neon `katana`; local Postgres `katana` in dev)
+   │                  ├─▶ SMTP            sign-in links, calendar invitations, outcome emails
+   │                  ├─▶ AI provider     CV → candidate + summary (Anthropic / OpenAI / Gemini / xAI / Moonshot)
+   │                  └─▶ RiteVizor API   rubric dimensions + band anchors → interview questions
+   └─ /launch: the original event landing page (RSVPs via POST /api/registrations)
 ```
 
-- **Frontend** — React 18 + React Router + Tailwind + Framer Motion + Recharts. All portal
-  code lives under [`src/portal/`](src/portal/). Brand system reused from the launch site
-  (deep-green / gold, Funnel Display + Geologica).
-- **Backend** — [`server/`](server/): Express API owning the DB connection, magic-link auth
-  (signed-JWT session cookie), and role-based access control.
-- **Database** — local Postgres. Schema in [`server/sql/schema.sql`](server/sql/schema.sql),
-  seed generated from the workbook + PDF.
+| Module | What it owns |
+|---|---|
+| `server/index.mjs` | App wiring, auth routes, dashboard, candidate file, candidate's own page (`/api/me`), feedback, admin accounts |
+| `server/auth.mjs` | Magic-link tokens, signed-JWT session cookie, `requireAuth(roles…)` |
+| `server/sso.mjs` | TerraNova sign-in handoff (`POST /sso/terranova`) |
+| `server/assessment.mjs` | Cohorts, interview panels, questions (admin + panel), per-question scoring, score/rank recomputation |
+| `server/interviews.mjs` | Interview slots, calendar invitations (.ics), closing / reopening a cohort, outcome emails, notification log |
+| `server/calendar.mjs` | iCalendar builder (REQUEST / CANCEL, SEQUENCE for updates) |
+| `server/cv-ingest.mjs`, `server/ai.mjs` | CV upload, AI reading of CVs into candidates + summaries |
+| `server/ritevizor.mjs` | RiteVizor client (`/api/v1/integrations/rubrics`), rubric → questions import |
+| `server/settings.mjs`, `server/settings-routes.mjs` | Admin-entered SMTP / AI / RiteVizor settings, encrypted at rest (AES-256-GCM keyed from `JWT_SECRET`); env vars as fallback |
+| `server/mailer.mjs` | Email templates and sending (nodemailer); every email says it's from "Ninani Group HR" |
+| `server/registrations.mjs` | Launch-page RSVPs |
+| `server/sql/schema.sql` | The whole schema; re-runnable (`create … if not exists`, `add column if not exists`) |
 
-### Routes
+### Routes (browser)
+
 | Route | Who | What |
 |---|---|---|
-| `/` | Public | Existing launch RSVP (unchanged) |
-| `/portal/login` | Everyone | Magic-link sign-in |
-| `/portal` | Panel + Admin | Dashboard: ranked list, cutoff line, radar of aggregate scores |
-| `/portal/candidate/:slug` | Panel + Admin | Submission + full scores + verbatim panel notes |
-| `/portal/me` | Candidate | Own curated, admin-approved feedback only |
-| `/portal/admin` | Admin | Accounts & invites, feedback curation, cutoff setting |
+| `/portal/login` | everyone | Email → sign-in link |
+| `/portal` | panel + admin | Dashboard, one cohort at a time, scoped to cohorts you're on the panel for |
+| `/portal/candidate/:slug` | panel + admin | CV summary, your assessment (scores, recommendation, notes), score breakdown, panel notes, feedback draft |
+| `/portal/me` | candidate | Interview slot; after the cohort is closed: outcome, published feedback, scores, CV summary without "Points to probe" |
+| `/portal/admin` | admin | Access & Invites · Cohorts (role, weights, panel, CVs, interviews, questions, close) · Candidate Feedback · Settings |
+| `/launch` | public | Event landing page |
 
 ### Access control
-- **Candidates** can only ever read their own page (`/api/me`) and only **approved** feedback.
-  Raw panel comments are never sent to candidates. Panel/admin endpoints return 403 for them.
-- **Panel** reads everything (read-only).
-- **Admin** manages accounts, invites, curated feedback, and the selection cutoff.
+
+Enforced in the API (`requireAuth`, `mayView`, `onPanel` in `server/assessment.mjs`):
+
+- **Candidate**: only `/api/me`; sees status, feedback, scores and CV summary only once their cohort is closed. Panel notes and individual scores are never sent.
+- **Panel member**: cohorts they're on the panel for (`cohort_panel`). May score, recommend, add questions (editable until scored) and draft feedback there. Nothing elsewhere.
+- **Admin**: everything, but can only *score* a cohort they're on the panel for, and the dashboard shows only their panel cohorts.
+
+### Data model (the interview part)
+
+```
+cohorts ─┬─ cohort_criteria   weight per dimension (criteria: behavioural, technical, experience, appearance)
+         ├─ cohort_panel      staff who interview it
+         ├─ questions         per dimension; guidance; source manual|ritevizor; created_by
+         ├─ candidates ─┬─ question_scores   one row per question × candidate × panel member (1–5)
+         │              ├─ scores            derived: points per dimension (mean of panelist means / 5 × weight)
+         │              ├─ panel_comments    each panel member's recommendation + notes
+         │              ├─ candidate_feedback  drafted by panel, approved by admin (approved = visible to candidate)
+         │              └─ cv_files
+         └─ closed_at        set by "close": scoring locked, results released
+notifications                every email sent (invitations, cancellations, outcomes) with delivery result
+```
+
+A candidate's `total_50` / `score_pct` / `rank` and `recommendations_summary` are recomputed by
+`recomputeCandidate()` after every save.
 
 ---
 
-## Running it
-
-Two processes (or one combined command):
+## Running it locally
 
 ```bash
 npm install
-npm run dev:all        # Vite (5173) + API (8787) together
-# — or separately —
-npm run dev            # Vite only
-npm run server         # API only
+npm run db:schema      # apply the schema to your local Postgres (database `katana`; PG* vars in .env)
+npm run dev:all        # Vite (5173) + API (8787)
 ```
 
-Open **http://localhost:5173/portal/login**.
-Admin account is seeded as **ekowthompson@gmail.com**.
+Open http://localhost:5173/portal/login. Without SMTP, sign-in links are printed to the API
+console; or as an admin use **Access & Invites → Copy link**.
 
-### First sign-in (no SMTP yet)
-Until SMTP is configured, magic links are **not emailed** — they’re printed to the API
-console. Copy the link from the terminal and open it. Once signed in as admin, use
-**Admin → Access & Invites → Copy link** to grab links for anyone else.
-
----
-
-## Database setup (already done once)
+Settings for SMTP, the AI provider and RiteVizor are entered in **Admin → Settings** and stored
+in the database; the `SMTP_*`, `ANTHROPIC_API_KEY`, `RITEVIZOR_API_URL` / `RITEVIZOR_API_KEY`
+env vars are fallbacks.
 
 ```bash
-# create db + schema
-createdb -U postgres datjf_portal        # or: psql -U postgres -c "create database datjf_portal"
-npm run db:schema                         # apply server/sql/schema.sql
-
-# generate + load data from the workbook & PDF
-npm run ingest                            # → src/data/candidates.json + supabase/seed.sql
-npm run db:seed                           # load candidates, scores, comments
+npm test               # unit tests (TerraNova SSO)
+npm run build          # production build
+npm run lint
 ```
 
-Accounts seeded: 1 admin, 20 candidate accounts (one per applicant email), 3 panel
-placeholders (edit their emails in the Admin portal).
+### Seed data
 
-> Re-running `npm run ingest && npm run db:seed` is safe — it upserts scores/rankings.
+`npm run ingest` turns `scripts/contacts.mjs` (candidate details + CV summaries, and the cohort
+they belong to) into `supabase/seed.sql`; `npm run db:seed` loads it. Both are re-runnable and
+never overwrite scores, notes, feedback or summaries entered through the app. The seed and the
+CVs in `Fellowship Applicants/` contain personal data and are git-ignored.
 
----
+### Testing against a throwaway database
 
-## Configuration (`.env`)
-
-```ini
-PGHOST=localhost
-PGPORT=5432
-PGUSER=postgres
-PGPASSWORD=
-PGDATABASE=datjf_portal
-
-PORT=8787
-APP_URL=http://localhost:5173
-JWT_SECRET=<long-random-string>          # change for production
-
-# Magic-link email delivery (optional — fill to enable real sending)
-SMTP_HOST=smtp.gmail.com
-SMTP_PORT=587
-SMTP_SECURE=false
-SMTP_USER=you@gmail.com
-SMTP_PASS=<app-password>
-SMTP_FROM="no-reply@…"   # address only; the sender name is always "Ninani Group HR"
-```
-
-For Gmail: enable 2FA, create an **App Password**, use it as `SMTP_PASS`.
+The end-to-end checks used during development start a disposable Postgres on `:55432`, point
+`PGPORT`/`PGDATABASE` at it, mock `nodemailer.createTransport` (to capture emails) and `fetch`
+for the RiteVizor host, then drive the real API. See the commit history of `backups/e2e-*.mjs`
+for the pattern. **Never run tests against `DATABASE_URL`/`PROD_DATABASE_URL`.**
 
 ---
 
-## Sending candidate feedback (the workflow)
+## Integrations
 
-1. **Admin → Candidate Feedback** → pick a candidate.
-2. Write an overall note and/or per-criterion feedback. Tick **“Approve & publish”** on each
-   section you want the candidate to see. Save.
-3. **Admin → Access & Invites → Candidates** → **Copy link** (or **Send** once SMTP is on)
-   for that candidate. They open it and land on `/portal/me` with only the approved feedback.
-
----
-
-## Data provenance
-
-Generated by [`scripts/ingest.mjs`](scripts/ingest.mjs) from:
-- [`scripts/contacts.mjs`](scripts/contacts.mjs) — each candidate's details and a panel-only
-  CV summary, written from the CVs in `Fellowship Applicants/`.
-- `Fellowship Applicants/*Interview_Scoring.xlsx` (optional, once interviews are scored) —
-  Dashboard (ranks, totals, status) + one sheet per candidate (normalised panel scores, verbatim
-  recommendations/comments, submissions). Point each candidate's `sheet` in `contacts.mjs` at
-  their worksheet. Without the workbook every candidate is seeded unscored, *Under Review*.
-
-> The workbook, PDF, generated `seed.sql` and `candidates.json` contain personal data and are
-> **git-ignored**. Regenerate anytime with `npm run ingest`.
+- **RiteVizor** (`server/ritevizor.mjs`): `GET {url}/api/v1/integrations/rubrics[/:slug]` with
+  `x-api-key`. On RiteVizor the endpoint is gated by `KATANA_API_KEY`
+  (`apps/api/src/routes/v1/integrations.ts`). Each rubric dimension imports as one question;
+  the chosen band's anchor becomes the question's guidance.
+- **Calendar invitations**: plain `.ics` attached as `icalEvent` (method REQUEST / CANCEL) with
+  a stable UID per candidate and an incrementing SEQUENCE, so re-sending updates the entry.
+- **TerraNova**: see `server/sso.mjs` and DEPLOY-VERCEL.md § TerraNova.

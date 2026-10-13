@@ -79,9 +79,33 @@ const slugify = (s) =>
 // ── Interview panels: who may see and score each cohort ─────────────────────
 // The cohorts this staff member is on the panel for, newest first.
 export const myCohorts = (accountId) => many(
-  `select co.slug, co.name, co.role, co.created_at
+  `select co.slug, co.name, co.role, co.created_at, co.closed_at, co.interview_location
      from cohort_panel p join cohorts co on co.slug = p.cohort_slug
     where p.account_id = $1 order by co.created_at desc, co.name`, [accountId])
+
+// Once a cohort is closed its scores are final.
+export const isClosed = async (cohortSlug) =>
+  !!(await one(`select 1 from cohorts where slug = $1 and closed_at is not null`, [cohortSlug]))
+
+const QUESTION_COLS = `q.id, q.criterion_key, q.body, q.guidance, q.source, q.sort_order, q.created_by,
+       (select coalesce(a.display_name, a.email) from accounts a where a.id = q.created_by) as created_by_name,
+       (select count(*)::int from question_scores s where s.question_id = q.id) as scores`
+
+async function insertQuestion({ cohortSlug, criterionKey, body, guidance, source, by }) {
+  return one(
+    `insert into questions (cohort_slug, criterion_key, body, guidance, source, created_by, sort_order)
+     values ($1, $2, $3, $4, $5, $6, (select coalesce(max(sort_order), -1) + 1 from questions where cohort_slug = $1 and criterion_key = $2))
+     returning id`, [cohortSlug, criterionKey, body, guidance || null, source || 'manual', by || null])
+}
+
+// Admins may change any question; a panel member only one they added that
+// nobody has scored yet.
+async function editableBy(account, questionId) {
+  const q = await one(`select id, cohort_slug, created_by, (select count(*)::int from question_scores s where s.question_id = questions.id) as scores from questions where id = $1`, [questionId])
+  if (!q) return { q: null, ok: false }
+  if (account.role === 'admin') return { q, ok: true }
+  return { q, ok: String(q.created_by) === String(account.id) && q.scores === 0 && (await onPanel(account.id, q.cohort_slug)) }
+}
 
 export async function onPanel(accountId, cohortSlug) {
   if (!cohortSlug) return false
@@ -101,8 +125,10 @@ export function assessmentRoutes() {
   r.get('/api/admin/cohorts', admin, async (req, res) => {
     const criteria = await many(`select key, label, weight, sort_order from criteria order by sort_order`)
     const cohorts = await many(`
-      select co.slug, co.name, co.role, co.created_at,
+      select co.slug, co.name, co.role, co.created_at, co.closed_at, co.interview_location,
              (select count(*)::int from candidates c where c.cohort_slug = co.slug) as candidates,
+             (select count(*)::int from candidates c where c.cohort_slug = co.slug and c.interview_at is not null) as scheduled,
+             (select count(*)::int from candidates c where c.cohort_slug = co.slug and c.status in ('review', 'discuss')) as undecided,
              (select count(*)::int from questions q where q.cohort_slug = co.slug) as questions,
              (select count(*)::int from cohort_panel p where p.cohort_slug = co.slug) as panel,
              coalesce((select json_object_agg(cc.criterion_key, cc.weight)
@@ -127,8 +153,8 @@ export function assessmentRoutes() {
         `insert into cohort_criteria (cohort_slug, criterion_key, weight)
          select $1, criterion_key, weight from cohort_criteria where cohort_slug = $2`, [slug, copyFrom])
       await query(
-        `insert into questions (cohort_slug, criterion_key, body, sort_order)
-         select $1, criterion_key, body, sort_order from questions where cohort_slug = $2 order by id`, [slug, copyFrom])
+        `insert into questions (cohort_slug, criterion_key, body, guidance, source, sort_order)
+         select $1, criterion_key, body, guidance, source, sort_order from questions where cohort_slug = $2 order by id`, [slug, copyFrom])
     } else {
       await query(
         `insert into cohort_criteria (cohort_slug, criterion_key, weight)
@@ -191,33 +217,50 @@ export function assessmentRoutes() {
     res.json({ ok: true })
   })
 
-  // ── Questions (admin) ────────────────────────────────────────────────────
+  // ── Questions ────────────────────────────────────────────────────────────
+  // Admins manage every cohort's questions; panel members can read their
+  // cohorts' questions and add their own (editable until someone scores them).
+  const listQuestions = (cohortSlug) => many(`select ${QUESTION_COLS} from questions q where q.cohort_slug = $1 order by q.sort_order, q.id`, [cohortSlug])
+
   r.get('/api/admin/cohorts/:slug/questions', admin, async (req, res) => {
-    const questions = await many(`
-      select q.id, q.criterion_key, q.body, q.sort_order,
-             (select count(*)::int from question_scores s where s.question_id = q.id) as scores
-        from questions q where q.cohort_slug = $1 order by q.sort_order, q.id`, [req.params.slug])
-    res.json({ questions })
+    res.json({ questions: await listQuestions(req.params.slug) })
   })
 
-  r.post('/api/admin/cohorts/:slug/questions', admin, async (req, res) => {
+  r.get('/api/cohorts/:slug/questions', staff, async (req, res) => {
+    if (!(await mayView(req.account, req.params.slug))) return res.status(403).json({ error: 'not_on_panel' })
+    const co = await one(`select slug, name, role, closed_at from cohorts where slug = $1`, [req.params.slug])
+    if (!co) return res.status(404).json({ error: 'not_found' })
+    res.json({ cohort: co, questions: await listQuestions(co.slug), canAdd: !co.closed_at && (await onPanel(req.account.id, co.slug)) })
+  })
+
+  const addQuestion = async (req, res, requirePanel) => {
     const body = String(req.body?.body || '').trim()
+    const guidance = String(req.body?.guidance || '').trim() || null
     const key = req.body?.criterionKey
     if (!body || !(await one(`select 1 from criteria where key = $1`, [key]))) return res.status(400).json({ error: 'bad_input' })
-    if (!(await one(`select 1 from cohorts where slug = $1`, [req.params.slug]))) return res.status(404).json({ error: 'not_found' })
-    const q = await one(
-      `insert into questions (cohort_slug, criterion_key, body, sort_order)
-       values ($1, $2, $3, (select coalesce(max(sort_order), -1) + 1 from questions where cohort_slug = $1 and criterion_key = $2))
-       returning id`, [req.params.slug, key, body])
+    const co = await one(`select slug, closed_at from cohorts where slug = $1`, [req.params.slug])
+    if (!co) return res.status(404).json({ error: 'not_found' })
+    if (requirePanel && !(await onPanel(req.account.id, co.slug))) return res.status(403).json({ error: 'not_on_panel' })
+    if (co.closed_at) return res.status(409).json({ error: 'cohort_closed', message: 'This cohort is closed.' })
+    const q = await insertQuestion({ cohortSlug: co.slug, criterionKey: key, body, guidance, source: 'manual', by: req.account.id })
     res.json({ ok: true, id: q.id })
-  })
+  }
+  r.post('/api/admin/cohorts/:slug/questions', admin, (req, res) => addQuestion(req, res, false))
+  r.post('/api/cohorts/:slug/questions', staff, (req, res) => addQuestion(req, res, true))
 
-  r.patch('/api/admin/questions/:id', admin, async (req, res) => {
+  const patchQuestion = async (req, res) => {
     const body = String(req.body?.body || '').trim()
     if (!body) return res.status(400).json({ error: 'bad_input' })
-    await query(`update questions set body = $2 where id = $1`, [req.params.id, body])
+    const { q, ok } = await editableBy(req.account, req.params.id)
+    if (!q) return res.status(404).json({ error: 'not_found' })
+    if (!ok) return res.status(403).json({ error: 'not_editable', message: 'Only questions you added, that nobody has scored yet, can be changed.' })
+    const guidance = typeof req.body?.guidance === 'string' ? req.body.guidance.trim() || null : undefined
+    await query(`update questions set body = $2, guidance = coalesce($3, guidance) where id = $1`, [q.id, body, guidance === undefined ? null : guidance])
+    if (guidance === null) await query(`update questions set guidance = null where id = $1`, [q.id])
     res.json({ ok: true })
-  })
+  }
+  r.patch('/api/admin/questions/:id', admin, patchQuestion)
+  r.patch('/api/questions/:id', staff, patchQuestion)
 
   // Reorder one dimension's questions: ids in their new order.
   r.post('/api/admin/cohorts/:slug/questions/order', admin, async (req, res) => {
@@ -229,27 +272,33 @@ export function assessmentRoutes() {
   })
 
   // Deleting a question deletes its scores, so rescore whoever it had scored.
-  r.delete('/api/admin/questions/:id', admin, async (req, res) => {
-    const affected = await many(`select distinct candidate_slug from question_scores where question_id = $1`, [req.params.id])
-    await query(`delete from questions where id = $1`, [req.params.id])
+  const deleteQuestion = async (req, res) => {
+    const { q, ok } = await editableBy(req.account, req.params.id)
+    if (!q) return res.status(404).json({ error: 'not_found' })
+    if (!ok) return res.status(403).json({ error: 'not_editable', message: 'Only questions you added, that nobody has scored yet, can be deleted.' })
+    const affected = await many(`select distinct candidate_slug from question_scores where question_id = $1`, [q.id])
+    await query(`delete from questions where id = $1`, [q.id])
     for (const a of affected) await recomputeCandidate(a.candidate_slug)
     res.json({ ok: true })
-  })
+  }
+  r.delete('/api/admin/questions/:id', admin, deleteQuestion)
+  r.delete('/api/questions/:id', staff, deleteQuestion)
 
   // ── Panel assessment of one candidate (panel + admin) ────────────────────
   r.get('/api/candidates/:slug/assessment', staff, async (req, res) => {
     const c = await one(
-      `select c.slug, c.cohort_slug, co.name as cohort_name
+      `select c.slug, c.cohort_slug, co.name as cohort_name, co.closed_at
          from candidates c left join cohorts co on co.slug = c.cohort_slug where c.slug = $1`, [req.params.slug])
     if (!c) return res.status(404).json({ error: 'not_found' })
     if (!(await mayView(req.account, c.cohort_slug))) return res.status(403).json({ error: 'not_on_panel' })
-    const canScore = await onPanel(req.account.id, c.cohort_slug)
+    const onThisPanel = await onPanel(req.account.id, c.cohort_slug)
+    const canScore = onThisPanel && !c.closed_at
     const dimensions = await many(`
       select cr.key, cr.label, coalesce(cc.weight, cr.weight) as weight
         from criteria cr left join cohort_criteria cc on cc.cohort_slug = $1 and cc.criterion_key = cr.key
        order by cr.sort_order`, [c.cohort_slug])
     const questions = await many(`
-      select q.id, q.criterion_key, q.body, s.score as my_score
+      select q.id, q.criterion_key, q.body, q.guidance, q.source, q.created_by, s.score as my_score
         from questions q
         left join question_scores s on s.question_id = q.id and s.candidate_slug = $2 and s.account_id = $3
        where q.cohort_slug = $1 order by q.sort_order, q.id`, [c.cohort_slug, c.slug, req.account.id])
@@ -257,13 +306,17 @@ export function assessmentRoutes() {
       `select recommendation, rec_code, comment from panel_comments where candidate_slug = $1 and account_id = $2`,
       [c.slug, req.account.id])
     res.json({
-      cohort: c.cohort_slug ? { slug: c.cohort_slug, name: c.cohort_name } : null,
+      cohort: c.cohort_slug ? { slug: c.cohort_slug, name: c.cohort_name, closed: !!c.closed_at } : null,
       canScore,
+      canAddQuestions: onThisPanel && !c.closed_at,
       scale: SCALE,
       recommendations: RECOMMENDATIONS,
       dimensions: dimensions.map((d) => ({
         key: d.key, label: d.label, weight: Number(d.weight),
-        questions: questions.filter((q) => q.criterion_key === d.key).map((q) => ({ id: q.id, body: q.body, myScore: q.my_score })),
+        questions: questions.filter((q) => q.criterion_key === d.key).map((q) => ({
+          id: q.id, body: q.body, guidance: q.guidance, source: q.source, myScore: q.my_score,
+          mine: String(q.created_by) === String(req.account.id),
+        })),
       })),
       mine: { recCode: mine?.rec_code || null, comment: mine?.comment || '' },
     })
@@ -276,6 +329,7 @@ export function assessmentRoutes() {
     if (!c) return res.status(404).json({ error: 'not_found' })
     if (!c.cohort_slug) return res.status(400).json({ error: 'no_cohort' })
     if (!(await onPanel(req.account.id, c.cohort_slug))) return res.status(403).json({ error: 'not_on_panel' })
+    if (await isClosed(c.cohort_slug)) return res.status(409).json({ error: 'cohort_closed', message: 'This cohort is closed; scores are final.' })
     const valid = new Set((await many(`select id from questions where cohort_slug = $1`, [c.cohort_slug])).map((q) => String(q.id)))
     const items = Array.isArray(req.body?.scores) ? req.body.scores : []
     for (const it of items) {

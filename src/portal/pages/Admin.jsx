@@ -4,6 +4,7 @@ import { motion } from 'framer-motion'
 import {
   Copy, Send, Trash2, Plus, Check, Link2, Mail, AlertTriangle, Target, Users2, MessageSquare,
   ListChecks, ArrowUp, ArrowDown, Pencil, X, FileUp, Sparkles, RotateCw, KeyRound, Eye, EyeOff,
+  CalendarDays, Lock, LockOpen, Download,
 } from 'lucide-react'
 import { api } from '../lib/api'
 import { Loader, StatusChip, STATUS_LABEL } from '../components/ui'
@@ -336,7 +337,9 @@ function CohortsTab({ data, reload, reloadDash, flash }) {
           <CohortSettings key={cohort.slug} cohort={cohort} criteria={criteria} reload={reload} flash={flash} />
           <PanelCard key={`panel-${cohort.slug}`} cohort={cohort} onSaved={reload} flash={flash} />
           <CvsCard key={`cv-${cohort.slug}`} cohort={cohort} onCandidates={() => { reload(); reloadDash() }} flash={flash} />
+          <InterviewsCard key={`iv-${cohort.slug}`} cohort={cohort} onChanged={() => { reload(); reloadDash() }} flash={flash} />
           <QuestionList key={`q-${cohort.slug}`} cohort={cohort} criteria={criteria} scale={scale} reloadCohorts={reload} flash={flash} />
+          <CloseCard key={`close-${cohort.slug}`} cohort={cohort} onChanged={() => { reload(); reloadDash() }} flash={flash} />
         </>
       )}
     </div>
@@ -465,6 +468,209 @@ function PanelCard({ cohort, onSaved, flash }) {
         ))}
       </div>
       <button className="btn-gold btn-sm" style={{ marginTop: 14 }} disabled={busy || !changed} onClick={save}>{busy ? 'Saving…' : 'Save panel'}</button>
+    </div>
+  )
+}
+
+// <input type="datetime-local"> wants local wall-clock time without a zone.
+const toLocalInput = (iso) => {
+  if (!iso) return ''
+  const d = new Date(iso); const p = (n) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`
+}
+const fmtAgo = (iso) => new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }).format(new Date(iso))
+
+// Interview slots per candidate, and the calendar invitations that go out to
+// the panel (and, if asked, the candidates).
+function InterviewsCard({ cohort, onChanged, flash }) {
+  const [d, setD] = useState(null)
+  const [loc, setLoc] = useState('')
+  const [edits, setEdits] = useState({}) // slug -> { at, minutes, location }
+  const [busy, setBusy] = useState('')
+  const [includeCandidate, setIncludeCandidate] = useState(false)
+  const load = () => api.admin.interviews(cohort.slug).then((r) => { setD(r); setLoc(r.cohort.interview_location || ''); setEdits({}) }).catch(() => flash('Could not load interviews'))
+  useEffect(() => { api.admin.interviews(cohort.slug).then((r) => { setD(r); setLoc(r.cohort.interview_location || '') }).catch(() => {}) }, [cohort.slug])
+  if (!d) return <div className="card card-pad"><div className="spin" /></div>
+
+  const scheduled = d.candidates.filter((c) => c.interview_at)
+  const edit = (slug, patch) => setEdits((e) => ({ ...e, [slug]: { ...(e[slug] || {}), ...patch } }))
+  const valueOf = (c) => ({
+    at: edits[c.slug]?.at ?? toLocalInput(c.interview_at),
+    minutes: edits[c.slug]?.minutes ?? String(c.interview_minutes || 45),
+    location: edits[c.slug]?.location ?? (c.interview_location || ''),
+  })
+  const saveSlot = async (c) => {
+    const v = valueOf(c)
+    setBusy(c.slug)
+    try {
+      await api.admin.setInterview(c.slug, { interviewAt: v.at ? new Date(v.at).toISOString() : null, minutes: Number(v.minutes), location: v.location })
+      await load(); onChanged(); flash(v.at ? `Slot saved for ${c.name}` : `Slot cleared for ${c.name}`)
+    } catch (e) { flash(e.message || 'Could not save the slot') } finally { setBusy('') }
+  }
+  const saveLocation = async () => {
+    setBusy('loc')
+    try { await api.admin.setInterviewLocation(cohort.slug, loc); await load(); flash('Default venue saved') } catch { flash('Could not save') } finally { setBusy('') }
+  }
+  const send = async (slugs) => {
+    setBusy('send')
+    try {
+      const r = await api.admin.sendInvites(cohort.slug, { candidateSlugs: slugs, includeCandidate })
+      await load()
+      flash(`${r.sent} invitation${r.sent === 1 ? '' : 's'} sent for ${r.candidates} interview${r.candidates === 1 ? '' : 's'}${r.failed ? ` · ${r.failed} failed` : ''}`)
+    } catch (e) { flash(e.message || 'Could not send invitations') } finally { setBusy('') }
+  }
+  const cancel = async (c) => {
+    if (!confirm(`Cancel ${c.name}’s interview?${c.invites_sent_at ? ' A cancellation goes to everyone who was invited.' : ''}`)) return
+    setBusy(c.slug)
+    try { const r = await api.admin.cancelInterview(c.slug); await load(); onChanged(); flash(r.cancelled ? `Cancelled · ${r.cancelled} notified` : 'Slot cleared') }
+    catch (e) { flash(e.message || 'Could not cancel') } finally { setBusy('') }
+  }
+
+  return (
+    <div className="card">
+      <div className="card-pad card-hairline" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        <span className="card-title"><CalendarDays size={13} style={{ verticalAlign: '-2px', marginRight: 6 }} />Interviews · {scheduled.length} of {d.candidates.length} scheduled</span>
+        <span className="tag">{d.panel.length} on the panel{d.smtp ? '' : ' · email not set up'}</span>
+      </div>
+      <div className="card-pad" style={{ display: 'grid', gap: 14 }}>
+        <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-3 items-end">
+          <div><label>Default venue or meeting link</label><input type="text" value={loc} onChange={(e) => setLoc(e.target.value)} placeholder="e.g. Ninani House, Accra · or a video-call link" /></div>
+          <button className="btn-ghost btn-sm" disabled={busy === 'loc' || loc === (d.cohort.interview_location || '')} onClick={saveLocation}>Save venue</button>
+        </div>
+
+        {d.candidates.length === 0 && <p style={{ fontSize: 12, color: 'var(--color-cream-muted)', fontStyle: 'italic' }}>Upload CVs first; candidates appear here once they’re in the cohort.</p>}
+        {d.candidates.map((c) => {
+          const v = valueOf(c)
+          const changed = !!edits[c.slug]
+          const inv = c.last_invite
+          return (
+            <div key={c.slug} style={{ borderLeft: '2px solid var(--color-border-green)', paddingLeft: 12, display: 'grid', gap: 8 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                <span style={{ fontSize: 13, color: 'var(--color-cream)' }}>{c.name}{!c.email && <span className="tag" style={{ marginLeft: 8, color: 'var(--color-error)' }}>no email</span>}</span>
+                <span style={{ fontSize: 11, color: inv?.error ? 'var(--color-error)' : 'var(--color-cream-muted)' }}>
+                  {c.invites_sent_at ? `Invitations sent ${fmtAgo(c.invites_sent_at)}` : c.interview_at ? 'Not sent yet' : ''}
+                  {inv?.error && ` · last send failed: ${inv.error}`}
+                </span>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-[1.3fr_0.6fr_1.4fr_auto_auto] gap-2 items-end">
+                <div><label>Date &amp; time</label><input type="datetime-local" value={v.at} onChange={(e) => edit(c.slug, { at: e.target.value })} /></div>
+                <div><label>Minutes</label><input type="number" min="10" max="240" step="5" value={v.minutes} onChange={(e) => edit(c.slug, { minutes: e.target.value })} /></div>
+                <div className="col-span-2 sm:col-span-1"><label>Venue (if different)</label><input type="text" value={v.location} onChange={(e) => edit(c.slug, { location: e.target.value })} placeholder={d.cohort.interview_location || '—'} /></div>
+                <button className="btn-gold btn-sm" disabled={!!busy || !changed} onClick={() => saveSlot(c)}>{busy === c.slug ? '…' : 'Save'}</button>
+                <div style={{ display: 'flex', gap: 4 }}>
+                  <button className="btn-ghost btn-sm" disabled={!!busy || !c.interview_at || changed || !d.smtp} onClick={() => send([c.slug])} title="Email the calendar invitation for this interview"><Send size={12} /></button>
+                  <button className="btn-ghost btn-sm" disabled={!!busy || !c.interview_at} onClick={() => cancel(c)} title="Cancel this interview" style={{ borderColor: 'rgba(232,92,92,0.3)' }}><X size={12} style={{ color: 'var(--color-error)' }} /></button>
+                </div>
+              </div>
+            </div>
+          )
+        })}
+
+        {d.candidates.length > 0 && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', paddingTop: 6, borderTop: '1px solid var(--color-border-green)' }}>
+            <button className="btn-gold btn-sm" disabled={!!busy || !scheduled.length || !d.smtp} onClick={() => send([])}>
+              <Send size={13} /> {busy === 'send' ? 'Sending…' : `Send invitations for all ${scheduled.length} scheduled`}
+            </button>
+            <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, margin: 0, cursor: 'pointer', textTransform: 'none', letterSpacing: 0, fontSize: 11.5, color: 'var(--color-cream)' }}>
+              <input type="checkbox" checked={includeCandidate} onChange={(e) => setIncludeCandidate(e.target.checked)} style={{ width: 14, height: 14 }} /> Also invite the candidates
+            </label>
+            <span style={{ fontSize: 11, color: 'var(--color-cream-muted)' }}>
+              {d.smtp ? 'Each panel member gets an email with a calendar invitation (.ics) that adds the interview to Outlook or Google Calendar. Sending again updates the existing entry.' : 'Set up email under Settings to send invitations.'}
+            </span>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// Close the gate: every candidate needs a decision, then scores lock and each
+// candidate is emailed their outcome with a sign-in link.
+function CloseCard({ cohort, onChanged, flash }) {
+  const [d, setD] = useState(null)
+  const [notify, setNotify] = useState(true)
+  const [busy, setBusy] = useState(false)
+  const [log, setLog] = useState(null)
+  const load = () => Promise.all([api.admin.interviews(cohort.slug), api.admin.notifications(cohort.slug)])
+    .then(([iv, n]) => { setD(iv); setLog(n.notifications.filter((x) => x.kind === 'results')) }).catch(() => {})
+  useEffect(() => { load() }, [cohort.slug]) // eslint-disable-line react-hooks/exhaustive-deps
+  if (!d) return <div className="card card-pad"><div className="spin" /></div>
+
+  const closed = !!d.cohort.closed_at
+  const undecided = d.undecided
+  const withEmail = d.candidates.filter((c) => c.email).length
+  const failed = d.candidates.filter((c) => c.email && !c.result_sent_at)
+
+  const close = async () => {
+    const msg = notify
+      ? `Close ${cohort.name}?\n\nScores become final, and ${withEmail} candidate${withEmail === 1 ? '' : 's'} will be emailed their outcome with a link to their feedback. This can’t be un-sent.`
+      : `Close ${cohort.name} without emailing anyone?\n\nScores become final and candidates who sign in will see their outcome.`
+    if (!confirm(msg)) return
+    setBusy(true)
+    try {
+      const r = await api.admin.closeCohort(cohort.slug, { notify })
+      await load(); onChanged()
+      flash(notify ? `Closed · ${r.notified} emailed${r.failed ? ` · ${r.failed} failed` : ''}${r.skipped ? ` · ${r.skipped} without email` : ''}` : 'Cohort closed')
+    } catch (e) { flash(e.message || 'Could not close the cohort') } finally { setBusy(false) }
+  }
+  const reopen = async () => {
+    if (!confirm(`Reopen ${cohort.name}? Candidates will stop seeing their outcome until it’s closed again, and scoring unlocks.`)) return
+    setBusy(true)
+    try { await api.admin.reopenCohort(cohort.slug); await load(); onChanged(); flash('Cohort reopened') } catch { flash('Could not reopen') } finally { setBusy(false) }
+  }
+  const resend = async () => {
+    setBusy(true)
+    try { const r = await api.admin.sendResults(cohort.slug, { candidateSlugs: failed.map((c) => c.slug) }); await load(); flash(`${r.notified} emailed${r.failed ? ` · ${r.failed} failed` : ''}`) }
+    catch (e) { flash(e.message || 'Could not send') } finally { setBusy(false) }
+  }
+
+  return (
+    <div className="card card-pad" style={{ borderColor: closed ? 'rgba(92,184,120,0.35)' : undefined }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        <span className="card-title">{closed ? <Lock size={13} style={{ verticalAlign: '-2px', marginRight: 6 }} /> : <LockOpen size={13} style={{ verticalAlign: '-2px', marginRight: 6 }} />}{closed ? 'Cohort closed' : 'Close the cohort'}</span>
+        {closed
+          ? <span className="chip chip-selected"><span className="dot" />Closed {fmtAgo(d.cohort.closed_at)}</span>
+          : <span className="chip chip-review"><span className="dot" />{undecided.length ? `${undecided.length} undecided` : 'Ready to close'}</span>}
+      </div>
+      {closed ? (
+        <>
+          <p style={{ fontSize: 12.5, color: 'var(--color-cream-muted)', margin: '10px 0 0', lineHeight: 1.6 }}>
+            Scores are final. Candidates who sign in see their outcome, published feedback and CV summary.
+            {' '}{d.candidates.filter((c) => c.result_sent_at).length} of {withEmail} candidates have been emailed their outcome.
+          </p>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 14 }}>
+            {failed.length > 0 && d.smtp && <button className="btn-gold btn-sm" disabled={busy} onClick={resend}><Send size={12} /> Email the {failed.length} not yet sent</button>}
+            <button className="btn-ghost btn-sm" disabled={busy} onClick={reopen}><LockOpen size={12} /> Reopen</button>
+          </div>
+        </>
+      ) : (
+        <>
+          <p style={{ fontSize: 12.5, color: 'var(--color-cream-muted)', margin: '10px 0 0', lineHeight: 1.6 }}>
+            Closing locks every score and releases results: candidates can then see their outcome, published feedback and how the panel read their CV.
+            Before closing, set a <strong style={{ color: 'var(--color-cream)' }}>Decision Status</strong> for every candidate under Candidate Feedback and publish the feedback you want them to see.
+          </p>
+          {undecided.length > 0 && <p style={{ fontSize: 12, color: 'var(--color-gold)', marginTop: 8 }}>Still undecided: {undecided.join(', ')}.</p>}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginTop: 14 }}>
+            <button className="btn-gold btn-sm" disabled={busy || !d.candidates.length || undecided.length > 0 || (notify && !d.smtp)} onClick={close}><Lock size={12} /> {busy ? 'Closing…' : notify ? 'Close & email outcomes' : 'Close'}</button>
+            <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, margin: 0, cursor: 'pointer', textTransform: 'none', letterSpacing: 0, fontSize: 11.5, color: 'var(--color-cream)' }}>
+              <input type="checkbox" checked={notify} onChange={(e) => setNotify(e.target.checked)} style={{ width: 14, height: 14 }} /> Email every candidate their outcome
+            </label>
+            {notify && !d.smtp && <span style={{ fontSize: 11, color: 'var(--color-gold)' }}>Set up email under Settings first.</span>}
+          </div>
+        </>
+      )}
+      {log && log.length > 0 && (
+        <div style={{ marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--color-border-green)' }}>
+          <span className="portal-eyebrow">Outcome emails</span>
+          <div style={{ display: 'grid', gap: 4, marginTop: 8 }}>
+            {log.slice(0, 12).map((n) => (
+              <div key={n.id} style={{ fontSize: 11.5, color: n.delivered ? 'var(--color-cream-muted)' : 'var(--color-error)' }}>
+                {fmtAgo(n.created_at)} · {n.candidate_name || n.recipient} · {n.delivered ? 'sent' : `failed${n.error ? `: ${n.error}` : ''}`}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -613,9 +819,12 @@ function QuestionList({ cohort, criteria, scale, reloadCohorts, flash }) {
 
   return (
     <div style={{ display: 'grid', gap: '1.25rem' }}>
-      <p style={{ fontSize: 12, color: 'var(--color-cream-muted)', lineHeight: 1.6 }}>
-        Panel members score every item below from 1 to {scale} on each candidate’s file. A dimension’s score is the average of its items, so the number of questions doesn’t change its weight.
-      </p>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
+        <p style={{ fontSize: 12, color: 'var(--color-cream-muted)', lineHeight: 1.6, flex: '1 1 320px', margin: 0 }}>
+          Panel members score every item below from 1 to {scale} on each candidate’s file. A dimension’s score is the average of its items, so the number of questions doesn’t change its weight. Panel members can also add questions from a candidate’s file.
+        </p>
+        <RubricImport cohort={cohort} criteria={criteria} onImported={changed} flash={flash} />
+      </div>
       {criteria.map((cr) => {
         const list = questions.filter((q) => q.criterion_key === cr.key)
         const isAppearance = cr.key === 'appearance'
@@ -645,12 +854,99 @@ function QuestionList({ cohort, criteria, scale, reloadCohorts, flash }) {
   )
 }
 
+// Pull a role's rubric from RiteVizor: each dimension becomes a question, with
+// the band's anchor as scoring guidance.
+function RubricImport({ cohort, criteria, onImported, flash }) {
+  const [open, setOpen] = useState(false)
+  const [rubrics, setRubrics] = useState(null)
+  const [err, setErr] = useState('')
+  const [slug, setSlug] = useState('')
+  const [detail, setDetail] = useState(null)
+  const [band, setBand] = useState('')
+  const [target, setTarget] = useState('technical')
+  const [busy, setBusy] = useState(false)
+
+  const start = async () => {
+    setOpen(true); setErr('')
+    if (rubrics) return
+    try { const r = await api.admin.rubrics(); setRubrics(r.rubrics) } catch (e) { setErr(e.message || 'Could not reach RiteVizor.') }
+  }
+  const choose = async (s) => {
+    setSlug(s); setDetail(null); setBand('')
+    if (!s) return
+    try {
+      const r = await api.admin.rubric(s)
+      setDetail(r)
+      setBand(r.bands.length ? String(r.bands[0].level) : '')
+      setTarget(r.isBehavioural ? 'behavioural' : criteria.some((c) => c.key === 'technical') ? 'technical' : criteria[0]?.key)
+    } catch (e) { setErr(e.message || 'Could not read that rubric.') }
+  }
+  const run = async () => {
+    setBusy(true); setErr('')
+    try {
+      const r = await api.admin.importRubric(cohort.slug, { rubricSlug: slug, bandLevel: Number(band), criterionKey: target })
+      flash(`${r.added} question${r.added === 1 ? '' : 's'} imported from ${r.rubric}${r.skipped ? ` · ${r.skipped} already there` : ''}`)
+      setOpen(false); onImported()
+    } catch (e) { setErr(e.message || 'Import failed.') } finally { setBusy(false) }
+  }
+
+  if (!open) return <button className="btn-ghost btn-sm" onClick={start}><Download size={13} /> Import from RiteVizor</button>
+  const notConfigured = /Settings first/.test(err)
+  return (
+    <div className="card card-pad" style={{ flex: '1 1 100%', borderColor: 'rgba(201,168,76,0.35)' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+        <span className="card-title"><Download size={13} style={{ verticalAlign: '-2px', marginRight: 6 }} />Import questions from a RiteVizor rubric</span>
+        <button className="btn-ghost btn-sm" onClick={() => setOpen(false)}><X size={12} /></button>
+      </div>
+      {err && <p style={{ fontSize: 12, color: 'var(--color-error)', marginTop: 10 }}>{err}{notConfigured && <> See <strong>Settings → RiteVizor</strong>.</>}</p>}
+      {rubrics && (
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3" style={{ marginTop: 12 }}>
+          <div>
+            <label>Rubric</label>
+            <select value={slug} onChange={(e) => choose(e.target.value)}>
+              <option value="">Choose a rubric…</option>
+              {rubrics.map((r) => <option key={r.slug} value={r.slug}>{r.name}{r.isBehavioural ? ' (behavioural)' : r.subDiscipline ? ` · ${r.subDiscipline.name}` : ''} · {r.dimensionCount} dimensions</option>)}
+            </select>
+          </div>
+          <div>
+            <label>Band the role sits at</label>
+            <select value={band} onChange={(e) => setBand(e.target.value)} disabled={!detail}>
+              {!detail && <option value="">—</option>}
+              {detail?.bands.map((b) => <option key={b.level} value={b.level}>{b.name}</option>)}
+            </select>
+          </div>
+          <div>
+            <label>Add under</label>
+            <select value={target} onChange={(e) => setTarget(e.target.value)}>
+              {criteria.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
+            </select>
+          </div>
+        </div>
+      )}
+      {detail && (
+        <div style={{ marginTop: 12 }}>
+          <p style={{ fontSize: 11.5, color: 'var(--color-cream-muted)', lineHeight: 1.6 }}>
+            {detail.name} · {detail.versionLabel}. Each dimension becomes one question; its definition and the chosen band’s anchor are shown to the panel as “what a strong answer shows”. Dimensions already imported here are skipped.
+          </p>
+          <ul style={{ margin: '8px 0 0', paddingLeft: 18, fontSize: 12, color: 'var(--color-cream)', lineHeight: 1.7 }}>
+            {detail.dimensions.map((d) => <li key={d.name}>{d.name}</li>)}
+          </ul>
+          <button className="btn-gold btn-sm" style={{ marginTop: 12 }} disabled={busy || !band} onClick={run}><Download size={12} /> {busy ? 'Importing…' : `Import ${detail.dimensions.length} questions`}</button>
+        </div>
+      )}
+      {!rubrics && !err && <p style={{ fontSize: 12, color: 'var(--color-cream-muted)', marginTop: 10 }}>Loading rubrics…</p>}
+    </div>
+  )
+}
+
 function QuestionRow({ q, index, last, onMove, onChanged, flash }) {
   const [editing, setEditing] = useState(false)
   const [body, setBody] = useState(q.body)
+  const [guidance, setGuidance] = useState(q.guidance || '')
+  const [showGuidance, setShowGuidance] = useState(false)
   const save = async () => {
     if (!body.trim()) return
-    try { await api.admin.updateQuestion(q.id, { body: body.trim() }); setEditing(false); onChanged(); flash('Question updated') }
+    try { await api.admin.updateQuestion(q.id, { body: body.trim(), guidance }); setEditing(false); onChanged(); flash('Question updated') }
     catch { flash('Could not update') }
   }
   const remove = async () => {
@@ -663,19 +959,33 @@ function QuestionRow({ q, index, last, onMove, onChanged, flash }) {
     return (
       <div style={{ display: 'grid', gap: 8 }}>
         <textarea className="portal-input" value={body} onChange={(e) => setBody(e.target.value)} style={{ minHeight: 60 }} autoFocus />
+        <div>
+          <label>What a strong answer shows (optional, shown to the panel)</label>
+          <textarea className="portal-input" value={guidance} onChange={(e) => setGuidance(e.target.value)} style={{ minHeight: 60 }} placeholder="Guidance for scoring this question…" />
+        </div>
         <div style={{ display: 'flex', gap: 8 }}>
           <button className="btn-gold btn-sm" onClick={save} disabled={!body.trim()}><Check size={13} /> Save</button>
-          <button className="btn-ghost btn-sm" onClick={() => { setBody(q.body); setEditing(false) }}><X size={13} /> Cancel</button>
+          <button className="btn-ghost btn-sm" onClick={() => { setBody(q.body); setGuidance(q.guidance || ''); setEditing(false) }}><X size={13} /> Cancel</button>
         </div>
       </div>
     )
   }
   return (
     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'flex-start', borderLeft: '2px solid var(--color-border-green)', paddingLeft: 12 }}>
-      <p style={{ flex: '1 1 240px', fontSize: 13, color: 'var(--color-cream)', lineHeight: 1.6, margin: 0 }}>
-        <span style={{ color: 'var(--color-gold-muted)', marginRight: 6 }}>{index + 1}.</span>{q.body}
-        {q.scores > 0 && <span className="tag" style={{ marginLeft: 8 }}>{q.scores} score{q.scores === 1 ? '' : 's'}</span>}
-      </p>
+      <div style={{ flex: '1 1 240px', minWidth: 0 }}>
+        <p style={{ fontSize: 13, color: 'var(--color-cream)', lineHeight: 1.6, margin: 0 }}>
+          <span style={{ color: 'var(--color-gold-muted)', marginRight: 6 }}>{index + 1}.</span>{q.body}
+          {q.source === 'ritevizor' && <span className="tag" style={{ marginLeft: 8 }}>RiteVizor</span>}
+          {q.scores > 0 && <span className="tag" style={{ marginLeft: 8 }}>{q.scores} score{q.scores === 1 ? '' : 's'}</span>}
+        </p>
+        {(q.guidance || q.created_by_name) && (
+          <div style={{ fontSize: 11, color: 'var(--color-cream-muted)', marginTop: 3, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+            {q.guidance && <button type="button" onClick={() => setShowGuidance((s) => !s)} style={{ background: 'none', border: 'none', padding: 0, fontSize: 11, color: 'var(--color-gold)', cursor: 'pointer' }}>{showGuidance ? '▾' : '▸'} What a strong answer shows</button>}
+            {q.created_by_name && <span>Added by {q.created_by_name}</span>}
+          </div>
+        )}
+        {showGuidance && q.guidance && <p className="prose" style={{ fontSize: 12, marginTop: 6, paddingLeft: 10, borderLeft: '2px solid var(--color-gold-faint)' }}>{q.guidance}</p>}
+      </div>
       <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
         <button className="btn-ghost btn-sm" disabled={index === 0} onClick={() => onMove(-1)} title="Move up"><ArrowUp size={12} /></button>
         <button className="btn-ghost btn-sm" disabled={last} onClick={() => onMove(1)} title="Move down"><ArrowDown size={12} /></button>
@@ -722,6 +1032,7 @@ function SettingsTab({ flash, reloadOverview }) {
     <div style={{ display: 'grid', gap: '1.25rem', maxWidth: 820 }}>
       <SmtpCard smtp={data.smtp} onSaved={saved} flash={flash} />
       <AiCard ai={data.ai} onSaved={saved} flash={flash} />
+      <RitevizorCard rv={data.ritevizor} onSaved={saved} flash={flash} />
       <CutoffNote />
     </div>
   )
@@ -864,6 +1175,52 @@ function AiCard({ ai, onSaved, flash }) {
         <button className="btn-ghost btn-sm" disabled={!!busy || !hasKey} onClick={test}>{busy === 'test' ? 'Testing…' : 'Test key'}</button>
         <button className="btn-gold btn-sm" disabled={!!busy || !hasKey || !model.trim()} onClick={save}>{busy === 'save' ? 'Saving…' : 'Save & use this provider'}</button>
         {p?.keyMask && !p.keyFromEnv && <button className="btn-ghost btn-sm" disabled={!!busy} onClick={removeKey}>Remove key</button>}
+      </div>
+    </div>
+  )
+}
+
+function RitevizorCard({ rv, onSaved, flash }) {
+  const [url, setUrl] = useState(rv.url || '')
+  const [key, setKey] = useState('')
+  const [show, setShow] = useState(false)
+  const [busy, setBusy] = useState('')
+  const hasKey = !!(key.trim() || rv.keyMask)
+  const test = async () => {
+    setBusy('test')
+    try { const r = await api.admin.testRitevizor({ url, apiKey: key }); flash(`Connected · ${r.count} rubric${r.count === 1 ? '' : 's'} available`) }
+    catch (e) { flash(e.message || 'Test failed') } finally { setBusy('') }
+  }
+  const save = async () => {
+    setBusy('save')
+    try { await api.admin.saveRitevizor({ url, apiKey: key }); setKey(''); await onSaved(); flash('RiteVizor settings saved') }
+    catch (e) { flash(e.message || 'Could not save') } finally { setBusy('') }
+  }
+  const removeKey = async () => {
+    if (!confirm('Remove the saved RiteVizor key?')) return
+    await api.admin.saveRitevizor({ removeKey: true }); await onSaved(); flash('Key removed')
+  }
+  return (
+    <div className="card card-pad">
+      <span className="card-title"><Download size={13} style={{ verticalAlign: '-2px', marginRight: 6 }} />RiteVizor rubrics</span>
+      <p style={{ fontSize: 12, color: rv.source === 'none' ? 'var(--color-gold)' : 'var(--color-cream-muted)', margin: '8px 0 14px', lineHeight: 1.6 }}>
+        {rv.source === 'none' ? 'Not connected: add the API key to import a role’s rubric as interview questions.'
+          : <>Connected to <strong style={{ color: 'var(--color-cream)' }}>{rv.url}</strong>{rv.source === 'env' ? ' (from the server’s environment)' : ''}.</>}
+      </p>
+      <div className="grid grid-cols-1 sm:grid-cols-[1fr_1.2fr] gap-3">
+        <div><label>RiteVizor API address</label><input type="text" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://api.ritevizor.com" /></div>
+        <div>
+          <label>API key (KATANA_API_KEY on RiteVizor)</label>
+          <div style={{ display: 'flex', gap: 6 }}>
+            <input type={show ? 'text' : 'password'} value={key} onChange={(e) => setKey(e.target.value)} autoComplete="new-password" placeholder={rv.keyMask ? `${rv.keyMask} saved${rv.keyFromEnv ? ' (env)' : ''} — leave blank to keep` : ''} />
+            <button type="button" className="btn-ghost btn-sm" onClick={() => setShow((s) => !s)} title={show ? 'Hide' : 'Show'}>{show ? <EyeOff size={12} /> : <Eye size={12} />}</button>
+          </div>
+        </div>
+      </div>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 14 }}>
+        <button className="btn-ghost btn-sm" disabled={!!busy || !hasKey} onClick={test}>{busy === 'test' ? 'Testing…' : 'Test connection'}</button>
+        <button className="btn-gold btn-sm" disabled={!!busy || !hasKey} onClick={save}>{busy === 'save' ? 'Saving…' : 'Save'}</button>
+        {rv.keyMask && !rv.keyFromEnv && <button className="btn-ghost btn-sm" disabled={!!busy} onClick={removeKey}>Remove key</button>}
       </div>
     </div>
   )
