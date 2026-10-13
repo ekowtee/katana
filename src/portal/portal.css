@@ -116,6 +116,16 @@
 .btn-ghost:hover { border-color: var(--color-gold); color: var(--color-gold); }
 .btn-sm { padding: 0.45rem 0.8rem; font-size: 10px; }
 
+/* 1–5 score picker on the panel's assessment card */
+.score-pills { display: inline-flex; gap: 4px; flex-shrink: 0; }
+.score-pill {
+  width: 32px; height: 32px; border-radius: var(--radius-sm); border: 1px solid var(--color-border-green);
+  background: transparent; color: var(--color-cream-muted); font-family: 'Lexend', sans-serif; font-size: 12px; cursor: pointer;
+  transition: all var(--duration-normal) var(--ease-out-smooth);
+}
+.score-pill:hover { border-color: var(--color-gold); color: var(--color-gold); }
+.score-pill.on { background: var(--color-gold); border-color: var(--color-gold); color: var(--color-deep-green); font-weight: 700; }
+
 /* ── Prose (submissions / feedback) ──────────────────────────────────────── */
 .prose { color: var(--color-cream-muted); font-weight: 300; font-size: 0.92rem; line-height: 1.8; white-space: pre-wrap; }
 

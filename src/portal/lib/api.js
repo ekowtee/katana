@@ -23,6 +23,8 @@ export const api = {
 
   dashboard: () => req('/dashboard'),
   candidate: (slug) => req(`/candidates/${slug}`),
+  assessment: (slug) => req(`/candidates/${slug}/assessment`),
+  saveAssessment: (slug, payload) => req(`/candidates/${slug}/assessment`, { method: 'PUT', body: payload }),
   myResults: () => req('/me'),
 
   admin: {
@@ -35,5 +37,13 @@ export const api = {
     getFeedback: (slug) => req(`/admin/feedback/${slug}`),
     saveFeedback: (slug, items) => req(`/admin/feedback/${slug}`, { method: 'PUT', body: { items } }),
     updateCandidate: (slug, payload) => req(`/admin/candidates/${slug}`, { method: 'PATCH', body: payload }),
+    cohorts: () => req('/admin/cohorts'),
+    createCohort: (payload) => req('/admin/cohorts', { method: 'POST', body: payload }),
+    updateCohort: (slug, payload) => req(`/admin/cohorts/${slug}`, { method: 'PATCH', body: payload }),
+    questions: (cohort) => req(`/admin/cohorts/${cohort}/questions`),
+    addQuestion: (cohort, payload) => req(`/admin/cohorts/${cohort}/questions`, { method: 'POST', body: payload }),
+    updateQuestion: (id, payload) => req(`/admin/questions/${id}`, { method: 'PATCH', body: payload }),
+    deleteQuestion: (id) => req(`/admin/questions/${id}`, { method: 'DELETE' }),
+    orderQuestions: (cohort, ids) => req(`/admin/cohorts/${cohort}/questions/order`, { method: 'POST', body: { ids } }),
   },
 }

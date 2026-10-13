@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { motion } from 'framer-motion'
-import { ArrowLeft, Quote, GraduationCap, Phone, Mail, MapPin, CalendarDays, FileText } from 'lucide-react'
+import { ArrowLeft, Quote, GraduationCap, Phone, Mail, MapPin, CalendarDays, FileText, ClipboardCheck } from 'lucide-react'
 import { api } from '../lib/api'
 import { StatusChip, Loader, fmtPct, critShort } from '../components/ui'
 import { useAuth } from '../lib/AuthContext'
@@ -19,6 +19,8 @@ export default function CandidateDetail() {
     setD(null)
     api.candidate(slug).then(setD).catch(() => setErr('Could not load candidate.'))
   }, [slug])
+  // After the panel member saves scores: refresh totals without the loader.
+  const reload = () => api.candidate(slug).then(setD).catch(() => {})
 
   if (err) return <p style={{ color: 'var(--color-error)' }}>{err}</p>
   if (!d) return <Loader label="Loading candidate" />
@@ -61,7 +63,7 @@ export default function CandidateDetail() {
         <div className="text-left sm:text-right mt-4 sm:mt-0">
           <div className="portal-eyebrow">Total Score</div>
           <div style={{ fontFamily: 'Cormorant Garamond, serif', fontSize: '2.8rem', lineHeight: 1, color: 'var(--color-gold)', fontWeight: 600 }}>
-            {c.total_50 != null ? Number(c.total_50).toFixed(1) : '—'}<span style={{ fontSize: '1rem', color: 'var(--color-cream-muted)' }}> / 50</span>
+            {c.total_50 != null ? Number(c.total_50).toFixed(1) : '—'}<span style={{ fontSize: '1rem', color: 'var(--color-cream-muted)' }}> / {d.maxPoints ?? 50}</span>
           </div>
           <div style={{ fontSize: 13, color: 'var(--color-cream-muted)', marginTop: 4 }}>{fmtPct(c.score_pct)} attainment</div>
         </div>
@@ -77,6 +79,8 @@ export default function CandidateDetail() {
           <p className="prose" style={{ marginTop: 14 }}>{c.cv_summary}</p>
         </div>
       )}
+
+      <AssessmentCard slug={c.slug} isAdmin={account?.role === 'admin'} onSaved={reload} />
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '1.25rem', marginTop: '1.25rem' }} className="dash-grid">
         {/* Score breakdown */}
@@ -184,6 +188,120 @@ export default function CandidateDetail() {
         </div>
       )}
     </motion.div>
+  )
+}
+
+// The signed-in panel member's own scores for this candidate: every question in
+// the candidate's cohort, 1–5, plus their recommendation and notes.
+function AssessmentCard({ slug, isAdmin, onSaved }) {
+  const [a, setA] = useState(null)
+  const [scores, setScores] = useState({}) // questionId -> 1..5
+  const [recCode, setRecCode] = useState('')
+  const [comment, setComment] = useState('')
+  const [dirty, setDirty] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [msg, setMsg] = useState('')
+
+  useEffect(() => {
+    setA(null)
+    api.assessment(slug).then((r) => {
+      setA(r)
+      setScores(Object.fromEntries(r.dimensions.flatMap((d) => d.questions).filter((q) => q.myScore != null).map((q) => [q.id, q.myScore])))
+      setRecCode(r.mine.recCode || '')
+      setComment(r.mine.comment || '')
+      setDirty(false)
+    }).catch(() => setMsg('Could not load the assessment.'))
+  }, [slug])
+
+  if (!a) return msg ? <p style={{ color: 'var(--color-error)', marginTop: '1.25rem' }}>{msg}</p> : null
+
+  const all = a.dimensions.flatMap((d) => d.questions)
+  const done = all.filter((q) => scores[q.id] != null).length
+  const pick = (id, n) => { setScores((s) => ({ ...s, [id]: s[id] === n ? null : n })); setDirty(true); setMsg('') }
+
+  const save = async () => {
+    setSaving(true); setMsg('')
+    try {
+      await api.saveAssessment(slug, {
+        scores: all.map((q) => ({ questionId: q.id, score: scores[q.id] ?? null })),
+        recCode: recCode || null, comment,
+      })
+      setDirty(false); setMsg('Saved'); onSaved()
+    } catch { setMsg('Could not save — please try again.') } finally { setSaving(false) }
+  }
+
+  return (
+    <div className="card card-pad" style={{ marginTop: '1.25rem' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+        <span className="card-title"><ClipboardCheck size={13} style={{ verticalAlign: '-2px', marginRight: 6 }} />Your Assessment</span>
+        <span className="tag">{a.cohort ? `${a.cohort.name} · ` : ''}{done} of {all.length} scored</span>
+      </div>
+
+      {!a.cohort ? (
+        <p style={{ fontSize: 12.5, color: 'var(--color-cream-muted)', marginTop: 14 }}>
+          This candidate isn’t in a cohort yet, so there are no questions to score.
+          {isAdmin && <> Assign one in <Link to={`/portal/admin?candidate=${slug}`} style={{ color: 'var(--color-gold)' }}>Admin → Candidate Feedback</Link>.</>}
+        </p>
+      ) : (
+        <>
+          <p style={{ fontSize: 12, color: 'var(--color-cream-muted)', marginTop: 8 }}>
+            Score each question from 1 (weak) to {a.scale} (excellent). Click a selected score again to clear it. Only you see your scores; the panel sees the average.
+          </p>
+          <div style={{ display: 'grid', gap: 22, marginTop: 18 }}>
+            {a.dimensions.map((dim) => (
+              <div key={dim.key}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', borderBottom: '1px solid var(--color-border-green)', paddingBottom: 6, marginBottom: 10 }}>
+                  <span className="portal-eyebrow" style={{ margin: 0 }}>{dim.label}</span>
+                  <span style={{ fontSize: 11, color: 'var(--color-cream-muted)' }}>{dim.weight} pts</span>
+                </div>
+                {dim.questions.length === 0 && (
+                  <p style={{ fontSize: 12, color: 'var(--color-cream-muted)', fontStyle: 'italic' }}>
+                    No questions set for this dimension yet.
+                    {isAdmin && <> Add them in <Link to="/portal/admin?tab=questions" style={{ color: 'var(--color-gold)' }}>Admin → Interview Questions</Link>.</>}
+                  </p>
+                )}
+                <div style={{ display: 'grid', gap: 10 }}>
+                  {dim.questions.map((q, i) => (
+                    <div key={q.id} style={{ display: 'flex', gap: 12, alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap' }}>
+                      <p style={{ fontSize: 13, color: 'var(--color-cream)', lineHeight: 1.6, flex: '1 1 260px', margin: 0 }}>
+                        <span style={{ color: 'var(--color-gold-muted)', marginRight: 6 }}>{i + 1}.</span>{q.body}
+                      </p>
+                      <div className="score-pills" role="group" aria-label={`Score for question ${i + 1}`}>
+                        {Array.from({ length: a.scale }, (_, k) => k + 1).map((n) => (
+                          <button key={n} type="button" className={`score-pill ${scores[q.id] === n ? 'on' : ''}`}
+                            aria-pressed={scores[q.id] === n} onClick={() => pick(q.id, n)}>{n}</button>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 220px) minmax(0, 1fr)', gap: 14, marginTop: 22 }} className="dash-grid">
+            <div>
+              <label>Your recommendation</label>
+              <select value={recCode} onChange={(e) => { setRecCode(e.target.value); setDirty(true); setMsg('') }} style={{ width: '100%' }}>
+                <option value="">—</option>
+                {a.recommendations.map((r) => <option key={r.code} value={r.code}>{r.label}</option>)}
+              </select>
+            </div>
+            <div>
+              <label>Your notes (panel only)</label>
+              <textarea className="portal-input" value={comment} onChange={(e) => { setComment(e.target.value); setDirty(true); setMsg('') }}
+                placeholder="Strengths, concerns, anything the panel should discuss…" />
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 14 }}>
+            <button className="btn-gold" onClick={save} disabled={saving || !dirty}>{saving ? 'Saving…' : 'Save assessment'}</button>
+            {msg && <span style={{ fontSize: 12, color: msg === 'Saved' ? 'var(--color-success)' : 'var(--color-error)' }}>{msg}</span>}
+            {!msg && dirty && <span style={{ fontSize: 12, color: 'var(--color-cream-muted)' }}>Unsaved changes</span>}
+          </div>
+        </>
+      )}
+    </div>
   )
 }
 

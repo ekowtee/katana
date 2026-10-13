@@ -54,4 +54,6 @@ export const critShort = (label = '') =>
     'Communication & Confidence': 'Communication',
     'Commitment & Professionalism': 'Commitment',
     'Appearance & Presentation': 'Appearance',
+    'Technical Competencies': 'Technical',
+    'Appearance & Presence': 'Appearance',
   }[label] || label)

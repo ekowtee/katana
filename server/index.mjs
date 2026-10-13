@@ -8,6 +8,7 @@ import {
 } from './auth.mjs'
 import { sendMagicLink, smtpConfigured } from './mailer.mjs'
 import { terranovaSso } from './sso.mjs'
+import { assessmentRoutes, recomputeCandidate, rankCohort } from './assessment.mjs'
 
 const app = express()
 app.use(express.json())
@@ -48,6 +49,9 @@ app.post('/api/auth/logout', (req, res) => { clearSession(res); res.json({ ok: t
 // Staff arriving from TerraNova: POST /sso/terranova (see server/sso.mjs).
 app.use(terranovaSso())
 
+// Cohorts, interview questions and per-question panel scoring (see server/assessment.mjs).
+app.use(assessmentRoutes())
+
 app.get('/api/auth/me', async (req, res) => {
   const acc = await currentAccount(req)
   if (!acc) return res.json({ account: null })
@@ -70,7 +74,7 @@ app.get('/api/dashboard', requireAuth('panel', 'admin'), async (req, res) => {
   // selection cutoff falls cleanly below the selected group.
   const candidates = await many(`
     select slug, name, category, rank, interview_day, total_50, score_pct, status, scored,
-           recommendations_summary, panel_reading
+           recommendations_summary, panel_reading, cohort_slug
       from candidates
      order by case status
                 when 'selected' then 0 when 'discuss' then 1 when 'reserve' then 2
@@ -80,11 +84,13 @@ app.get('/api/dashboard', requireAuth('panel', 'admin'), async (req, res) => {
   const agg = await many(`
     select c.key, c.label, c.weight,
            avg(s.avg_norm) as avg_points,
-           avg(s.avg_norm / nullif(c.weight,0)) * 100 as avg_pct,
-           min(s.avg_norm / nullif(c.weight,0)) * 100 as min_pct,
-           max(s.avg_norm / nullif(c.weight,0)) * 100 as max_pct
+           avg(s.avg_norm / nullif(coalesce(cc.weight, c.weight),0)) * 100 as avg_pct,
+           min(s.avg_norm / nullif(coalesce(cc.weight, c.weight),0)) * 100 as min_pct,
+           max(s.avg_norm / nullif(coalesce(cc.weight, c.weight),0)) * 100 as max_pct
       from criteria c
       left join scores s on s.criterion_key = c.key
+      left join candidates cd on cd.slug = s.candidate_slug
+      left join cohort_criteria cc on cc.cohort_slug = cd.cohort_slug and cc.criterion_key = c.key
      group by c.key, c.label, c.weight order by c.sort_order`)
   res.json({
     cutoffRank: settings?.cutoff_rank ?? 10,
@@ -107,15 +113,20 @@ app.get('/api/candidates/:slug', requireAuth('panel', 'admin'), async (req, res)
   const c = await one(`select * from candidates where slug = $1`, [req.params.slug])
   if (!c) return res.status(404).json({ error: 'not_found' })
   const scores = await many(`
-    select s.criterion_key, cr.label, cr.weight, s.avg_norm
+    select s.criterion_key, cr.label, coalesce(cc.weight, cr.weight) as weight, s.avg_norm
       from scores s join criteria cr on cr.key = s.criterion_key
-     where s.candidate_slug = $1 order by cr.sort_order`, [c.slug])
+      left join cohort_criteria cc on cc.cohort_slug = $2 and cc.criterion_key = s.criterion_key
+     where s.candidate_slug = $1 order by cr.sort_order`, [c.slug, c.cohort_slug])
   const comments = await many(`
     select panelist_name, recommendation, rec_code, comment
       from panel_comments where candidate_slug = $1 order by id`, [c.slug])
   const feedback = await many(`
     select criterion_key, body, approved from candidate_feedback where candidate_slug = $1`, [c.slug])
-  res.json({ candidate: c, scores, comments, feedback })
+  // Points available: the cohort's weights, or the default weights if no cohort.
+  const max = await one(
+    `select coalesce((select sum(weight) from cohort_criteria where cohort_slug = $1),
+                     (select sum(weight) from criteria)) as points`, [c.cohort_slug])
+  res.json({ candidate: c, scores, comments, feedback, maxPoints: Number(max.points) })
 })
 
 // ════════════════════════════════════════════════════════════════════════
@@ -129,8 +140,10 @@ app.get('/api/me', requireAuth('candidate'), async (req, res) => {
            why_fellowship, career_ambitions, personal_statement, capstone, scored
       from candidates where slug = $1`, [slug])
   const scores = await many(`
-    select s.criterion_key, cr.label, cr.weight, s.avg_norm
+    select s.criterion_key, cr.label, coalesce(cc.weight, cr.weight) as weight, s.avg_norm
       from scores s join criteria cr on cr.key = s.criterion_key
+      join candidates c on c.slug = s.candidate_slug
+      left join cohort_criteria cc on cc.cohort_slug = c.cohort_slug and cc.criterion_key = s.criterion_key
      where s.candidate_slug = $1 order by cr.sort_order`, [slug])
   const feedback = await many(`
     select criterion_key, body from candidate_feedback
@@ -237,11 +250,21 @@ app.put('/api/admin/feedback/:slug', admin, async (req, res) => {
 
 // Edit candidate status / key fields
 app.patch('/api/admin/candidates/:slug', admin, async (req, res) => {
-  const { status, rank } = req.body || {}
+  const { status, rank, cohortSlug } = req.body || {}
+  const before = await one(`select cohort_slug from candidates where slug = $1`, [req.params.slug])
+  if (!before) return res.status(404).json({ error: 'not_found' })
+  if (cohortSlug && !(await one(`select 1 from cohorts where slug = $1`, [cohortSlug])))
+    return res.status(400).json({ error: 'bad_cohort' })
   await one(
-    `update candidates set status = coalesce($2,status), rank = coalesce($3,rank) where slug = $1 returning id`,
-    [req.params.slug, status || null, Number.isInteger(rank) ? rank : null]
+    `update candidates set status = coalesce($2,status), rank = coalesce($3,rank), cohort_slug = coalesce($4,cohort_slug)
+      where slug = $1 returning id`,
+    [req.params.slug, status || null, Number.isInteger(rank) ? rank : null, cohortSlug || null]
   )
+  // A new cohort means new questions and weights: rescore, and re-rank the old cohort.
+  if (cohortSlug && cohortSlug !== before.cohort_slug) {
+    await recomputeCandidate(req.params.slug)
+    if (before.cohort_slug) await rankCohort(before.cohort_slug)
+  }
   res.json({ ok: true })
 })
 

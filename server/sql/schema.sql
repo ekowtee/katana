@@ -127,6 +127,48 @@ create table if not exists terranova_jti (
   expires_at  timestamptz not null
 );
 
+-- ── Interview assessment: cohorts, questions, per-question panel scores ─────
+-- Each cohort sets its own weight per dimension (criteria) and its own questions.
+create table if not exists cohorts (
+  slug        text primary key,
+  name        text not null,
+  created_at  timestamptz not null default now()
+);
+
+create table if not exists cohort_criteria (
+  cohort_slug   text not null references cohorts(slug) on delete cascade,
+  criterion_key text not null references criteria(key) on delete cascade,
+  weight        numeric not null check (weight >= 0),
+  primary key (cohort_slug, criterion_key)
+);
+
+alter table candidates add column if not exists cohort_slug text references cohorts(slug) on delete set null;
+
+create table if not exists questions (
+  id            bigserial primary key,
+  cohort_slug   text not null references cohorts(slug) on delete cascade,
+  criterion_key text not null references criteria(key) on delete cascade,
+  body          text not null,
+  sort_order    int not null default 0,
+  created_at    timestamptz not null default now()
+);
+create index if not exists questions_cohort_idx on questions (cohort_slug, criterion_key, sort_order);
+
+-- One score (1–5) per question, per candidate, per panel member.
+create table if not exists question_scores (
+  question_id    bigint not null references questions(id) on delete cascade,
+  candidate_slug text not null references candidates(slug) on delete cascade,
+  account_id     uuid not null references accounts(id) on delete cascade,
+  score          int not null check (score between 1 and 5),
+  updated_at     timestamptz not null default now(),
+  primary key (question_id, candidate_slug, account_id)
+);
+
+-- Panel notes entered in the app carry the panel member's account (one row each
+-- per candidate); rows imported from a scoring workbook have none.
+alter table panel_comments add column if not exists account_id uuid references accounts(id) on delete cascade;
+create unique index if not exists panel_comments_account_uniq on panel_comments (candidate_slug, account_id);
+
 -- ── updated_at trigger ──────────────────────────────────────────────────────
 create or replace function touch_updated_at() returns trigger as $$
 begin new.updated_at = now(); return new; end; $$ language plpgsql;

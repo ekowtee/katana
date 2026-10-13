@@ -123,12 +123,17 @@ Points to probe
   },
 ]
 
+// The cohort these candidates are seeded into. Created if missing; its weights
+// and interview questions are then managed in Admin → Interview Questions.
+export const COHORT = { slug: 'october-2026', name: 'October 2026' }
+
+// Assessment dimensions. `weight` is the default for a new cohort (total 50);
+// each cohort sets its own in the admin page.
 export const CRITERIA = [
-  { key: 'cultural_fit', label: 'Personality & Cultural Fit', weight: 15 },
-  { key: 'critical_thinking', label: 'Critical Thinking & Creativity', weight: 10 },
-  { key: 'communication', label: 'Communication & Confidence', weight: 10 },
-  { key: 'commitment', label: 'Commitment & Professionalism', weight: 10 },
-  { key: 'appearance', label: 'Appearance & Presentation', weight: 5 },
+  { key: 'behavioural', label: 'Behavioural', weight: 15 },
+  { key: 'technical', label: 'Technical Competencies', weight: 15 },
+  { key: 'experience', label: 'Experience', weight: 10 },
+  { key: 'appearance', label: 'Appearance & Presence', weight: 10 },
 ]
 
 export const PANELISTS = [
