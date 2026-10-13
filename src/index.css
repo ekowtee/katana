@@ -145,6 +145,13 @@ input[type="email"],
 input[type="tel"],
 input[type="number"],
 input[type="password"],
+input[type="url"],
+input[type="search"],
+input[type="date"],
+input[type="time"],
+input[type="datetime-local"],
+input[type="month"],
+input[type="week"],
 select {
   width: 100%;
   height: 40px;
@@ -175,6 +182,27 @@ input::placeholder,
 select::placeholder {
   color: var(--color-cream);
   opacity: 0.3;
+}
+
+/* Date & time pickers: dark native picker and a light calendar/clock icon;
+   empty segments (dd/mm/yyyy, --:--) dimmed like a placeholder. */
+input[type="date"],
+input[type="time"],
+input[type="datetime-local"],
+input[type="month"],
+input[type="week"] {
+  color-scheme: dark;
+}
+input[type="date"]::-webkit-calendar-picker-indicator,
+input[type="time"]::-webkit-calendar-picker-indicator,
+input[type="datetime-local"]::-webkit-calendar-picker-indicator {
+  opacity: 0.75;
+  cursor: pointer;
+}
+input[type="date"]:not(:valid)::-webkit-datetime-edit,
+input[type="time"]:not(:valid)::-webkit-datetime-edit,
+input.empty-picker::-webkit-datetime-edit {
+  color: rgba(240, 235, 224, 0.35);
 }
 
 input:focus,

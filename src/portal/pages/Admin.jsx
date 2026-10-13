@@ -472,12 +472,11 @@ function PanelCard({ cohort, onSaved, flash }) {
   )
 }
 
-// <input type="datetime-local"> wants local wall-clock time without a zone.
-const toLocalInput = (iso) => {
-  if (!iso) return ''
-  const d = new Date(iso); const p = (n) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`
-}
+// Date and time are separate fields (local wall-clock time), so a date entered
+// without a time is visible as incomplete instead of silently empty.
+const pad2 = (n) => String(n).padStart(2, '0')
+const toDateInput = (iso) => { if (!iso) return ''; const d = new Date(iso); return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}` }
+const toTimeInput = (iso) => { if (!iso) return ''; const d = new Date(iso); return `${pad2(d.getHours())}:${pad2(d.getMinutes())}` }
 const fmtAgo = (iso) => new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }).format(new Date(iso))
 
 // Interview slots per candidate, and the calendar invitations that go out to
@@ -485,27 +484,60 @@ const fmtAgo = (iso) => new Intl.DateTimeFormat('en-GB', { day: 'numeric', month
 function InterviewsCard({ cohort, onChanged, flash }) {
   const [d, setD] = useState(null)
   const [loc, setLoc] = useState('')
-  const [edits, setEdits] = useState({}) // slug -> { at, minutes, location }
+  const [edits, setEdits] = useState({}) // slug -> { date, time, minutes, location }
   const [busy, setBusy] = useState('')
   const [includeCandidate, setIncludeCandidate] = useState(false)
-  const load = () => api.admin.interviews(cohort.slug).then((r) => { setD(r); setLoc(r.cohort.interview_location || ''); setEdits({}) }).catch(() => flash('Could not load interviews'))
-  useEffect(() => { api.admin.interviews(cohort.slug).then((r) => { setD(r); setLoc(r.cohort.interview_location || '') }).catch(() => {}) }, [cohort.slug])
+  // Reload without touching unsaved edits in other rows.
+  const load = () => api.admin.interviews(cohort.slug).then((r) => { setD(r); setLoc(r.cohort.interview_location || '') }).catch(() => flash('Could not load interviews'))
+  useEffect(() => { setEdits({}); api.admin.interviews(cohort.slug).then((r) => { setD(r); setLoc(r.cohort.interview_location || '') }).catch(() => {}) }, [cohort.slug])
   if (!d) return <div className="card card-pad"><div className="spin" /></div>
 
   const scheduled = d.candidates.filter((c) => c.interview_at)
   const edit = (slug, patch) => setEdits((e) => ({ ...e, [slug]: { ...(e[slug] || {}), ...patch } }))
+  const forget = (slugs) => setEdits((e) => { const n = { ...e }; for (const s of slugs) delete n[s]; return n })
   const valueOf = (c) => ({
-    at: edits[c.slug]?.at ?? toLocalInput(c.interview_at),
+    date: edits[c.slug]?.date ?? toDateInput(c.interview_at),
+    time: edits[c.slug]?.time ?? toTimeInput(c.interview_at),
     minutes: edits[c.slug]?.minutes ?? String(c.interview_minutes || 45),
     location: edits[c.slug]?.location ?? (c.interview_location || ''),
   })
-  const saveSlot = async (c) => {
+  // Is the row different from what's saved, and is it saveable?
+  const rowState = (c) => {
     const v = valueOf(c)
+    const saved = { date: toDateInput(c.interview_at), time: toTimeInput(c.interview_at), minutes: String(c.interview_minutes || 45), location: c.interview_location || '' }
+    const changed = v.date !== saved.date || v.time !== saved.time || String(v.minutes) !== saved.minutes || v.location.trim() !== saved.location
+    const mins = Number(v.minutes)
+    const problem = v.date && !v.time ? 'Add a time'
+      : v.time && !v.date ? 'Add a date'
+      : !(Number.isInteger(mins) && mins >= 10 && mins <= 240) ? 'Length must be 10–240 minutes'
+      : null
+    return { v, changed, problem }
+  }
+  const dirty = d.candidates.filter((c) => rowState(c).changed)
+  const saveable = dirty.filter((c) => !rowState(c).problem)
+
+  const saveRow = async (c) => {
+    const { v } = rowState(c)
+    const at = v.date && v.time ? new Date(`${v.date}T${v.time}`).toISOString() : null
+    await api.admin.setInterview(c.slug, { interviewAt: at, minutes: Number(v.minutes), location: v.location })
+    return at
+  }
+  const saveSlot = async (c) => {
     setBusy(c.slug)
     try {
-      await api.admin.setInterview(c.slug, { interviewAt: v.at ? new Date(v.at).toISOString() : null, minutes: Number(v.minutes), location: v.location })
-      await load(); onChanged(); flash(v.at ? `Slot saved for ${c.name}` : `Slot cleared for ${c.name}`)
-    } catch (e) { flash(e.message || 'Could not save the slot') } finally { setBusy('') }
+      const at = await saveRow(c)
+      forget([c.slug]); await load(); onChanged()
+      flash(at ? `Interview saved for ${c.name}` : `Interview cleared for ${c.name}`)
+    } catch (e) { flash(e.message || 'Could not save the interview') } finally { setBusy('') }
+  }
+  const saveAll = async () => {
+    setBusy('all')
+    const done = []
+    try {
+      for (const c of saveable) { await saveRow(c); done.push(c.slug) }
+      flash(`${done.length} interview${done.length === 1 ? '' : 's'} saved`)
+    } catch (e) { flash(`Saved ${done.length} of ${saveable.length}: ${e.message || 'one could not be saved'}`) }
+    finally { forget(done); await load(); onChanged(); setBusy('') }
   }
   const saveLocation = async () => {
     setBusy('loc')
@@ -540,25 +572,30 @@ function InterviewsCard({ cohort, onChanged, flash }) {
 
         {d.candidates.length === 0 && <p style={{ fontSize: 12, color: 'var(--color-cream-muted)', fontStyle: 'italic' }}>Upload CVs first; candidates appear here once they’re in the cohort.</p>}
         {d.candidates.map((c) => {
-          const v = valueOf(c)
-          const changed = !!edits[c.slug]
+          const { v, changed, problem } = rowState(c)
           const inv = c.last_invite
+          const status = changed
+            ? (problem ? { text: problem, color: 'var(--color-gold)' } : { text: 'Unsaved changes', color: 'var(--color-gold)' })
+            : c.interview_at
+              ? (inv?.error ? { text: `Saved · last send failed: ${inv.error}`, color: 'var(--color-error)' }
+                : { text: c.invites_sent_at ? `Saved · invitations sent ${fmtAgo(c.invites_sent_at)}` : 'Saved · invitations not sent yet', color: 'var(--color-cream-muted)' })
+              : { text: 'Not scheduled', color: 'var(--color-cream-muted)' }
           return (
-            <div key={c.slug} style={{ borderLeft: '2px solid var(--color-border-green)', paddingLeft: 12, display: 'grid', gap: 8 }}>
+            <div key={c.slug} style={{ borderLeft: `2px solid ${changed ? 'var(--color-gold)' : 'var(--color-border-green)'}`, paddingLeft: 12, display: 'grid', gap: 8 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
                 <span style={{ fontSize: 13, color: 'var(--color-cream)' }}>{c.name}{!c.email && <span className="tag" style={{ marginLeft: 8, color: 'var(--color-error)' }}>no email</span>}</span>
-                <span style={{ fontSize: 11, color: inv?.error ? 'var(--color-error)' : 'var(--color-cream-muted)' }}>
-                  {c.invites_sent_at ? `Invitations sent ${fmtAgo(c.invites_sent_at)}` : c.interview_at ? 'Not sent yet' : ''}
-                  {inv?.error && ` · last send failed: ${inv.error}`}
-                </span>
+                <span style={{ fontSize: 11, color: status.color }}>{status.text}</span>
               </div>
-              <div className="grid grid-cols-2 sm:grid-cols-[1.3fr_0.6fr_1.4fr_auto_auto] gap-2 items-end">
-                <div><label>Date &amp; time</label><input type="datetime-local" value={v.at} onChange={(e) => edit(c.slug, { at: e.target.value })} /></div>
-                <div><label>Minutes</label><input type="number" min="10" max="240" step="5" value={v.minutes} onChange={(e) => edit(c.slug, { minutes: e.target.value })} /></div>
-                <div className="col-span-2 sm:col-span-1"><label>Venue (if different)</label><input type="text" value={v.location} onChange={(e) => edit(c.slug, { location: e.target.value })} placeholder={d.cohort.interview_location || '—'} /></div>
-                <button className="btn-gold btn-sm" disabled={!!busy || !changed} onClick={() => saveSlot(c)}>{busy === c.slug ? '…' : 'Save'}</button>
+              <div className="grid grid-cols-2 sm:grid-cols-[1fr_0.75fr_0.6fr_1.3fr_auto_auto] gap-2 items-end">
+                <div><label htmlFor={`iv-date-${c.slug}`}>Date</label><input id={`iv-date-${c.slug}`} type="date" className={v.date ? '' : 'empty-picker'} value={v.date} onChange={(e) => edit(c.slug, { date: e.target.value })} /></div>
+                <div><label htmlFor={`iv-time-${c.slug}`}>Time</label><input id={`iv-time-${c.slug}`} type="time" step="300" className={v.time ? '' : 'empty-picker'} value={v.time} onChange={(e) => edit(c.slug, { time: e.target.value })} /></div>
+                <div><label htmlFor={`iv-min-${c.slug}`}>Minutes</label><input id={`iv-min-${c.slug}`} type="number" min="10" max="240" step="5" value={v.minutes} onChange={(e) => edit(c.slug, { minutes: e.target.value })} /></div>
+                <div><label htmlFor={`iv-loc-${c.slug}`}>Venue (if different)</label><input id={`iv-loc-${c.slug}`} type="text" value={v.location} onChange={(e) => edit(c.slug, { location: e.target.value })} placeholder={d.cohort.interview_location || '—'} /></div>
+                <button className={changed ? 'btn-gold btn-sm' : 'btn-ghost btn-sm'} disabled={!!busy || !changed || !!problem} onClick={() => saveSlot(c)} title={problem || (changed ? 'Save this interview' : 'No changes to save')}>
+                  {busy === c.slug ? 'Saving…' : changed ? 'Save' : <><Check size={12} /> Saved</>}
+                </button>
                 <div style={{ display: 'flex', gap: 4 }}>
-                  <button className="btn-ghost btn-sm" disabled={!!busy || !c.interview_at || changed || !d.smtp} onClick={() => send([c.slug])} title="Email the calendar invitation for this interview"><Send size={12} /></button>
+                  <button className="btn-ghost btn-sm" disabled={!!busy || !c.interview_at || changed || !d.smtp} onClick={() => send([c.slug])} title={changed ? 'Save first' : 'Email the calendar invitation for this interview'}><Send size={12} /></button>
                   <button className="btn-ghost btn-sm" disabled={!!busy || !c.interview_at} onClick={() => cancel(c)} title="Cancel this interview" style={{ borderColor: 'rgba(232,92,92,0.3)' }}><X size={12} style={{ color: 'var(--color-error)' }} /></button>
                 </div>
               </div>
@@ -567,15 +604,23 @@ function InterviewsCard({ cohort, onChanged, flash }) {
         })}
 
         {d.candidates.length > 0 && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', paddingTop: 6, borderTop: '1px solid var(--color-border-green)' }}>
-            <button className="btn-gold btn-sm" disabled={!!busy || !scheduled.length || !d.smtp} onClick={() => send([])}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', paddingTop: 10, borderTop: '1px solid var(--color-border-green)' }}>
+            {dirty.length > 0 && (
+              <button className="btn-gold btn-sm" disabled={!!busy || !saveable.length} onClick={saveAll}>
+                <Check size={13} /> {busy === 'all' ? 'Saving…' : `Save all changes (${saveable.length})`}
+              </button>
+            )}
+            <button className={dirty.length ? 'btn-ghost btn-sm' : 'btn-gold btn-sm'} disabled={!!busy || !scheduled.length || !d.smtp || dirty.length > 0} onClick={() => send([])}>
               <Send size={13} /> {busy === 'send' ? 'Sending…' : `Send invitations for all ${scheduled.length} scheduled`}
             </button>
             <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, margin: 0, cursor: 'pointer', textTransform: 'none', letterSpacing: 0, fontSize: 11.5, color: 'var(--color-cream)' }}>
               <input type="checkbox" checked={includeCandidate} onChange={(e) => setIncludeCandidate(e.target.checked)} style={{ width: 14, height: 14 }} /> Also invite the candidates
             </label>
-            <span style={{ fontSize: 11, color: 'var(--color-cream-muted)' }}>
-              {d.smtp ? 'Each panel member gets an email with a calendar invitation (.ics) that adds the interview to Outlook or Google Calendar. Sending again updates the existing entry.' : 'Set up email under Settings to send invitations.'}
+            <span style={{ fontSize: 11, color: dirty.length ? 'var(--color-gold)' : 'var(--color-cream-muted)', flex: '1 1 280px' }}>
+              {dirty.length ? 'Save your changes before sending invitations.'
+                : !d.smtp ? 'Set up email under Settings to send invitations.'
+                : !scheduled.length ? 'Set a date and time for at least one candidate, save it, then send.'
+                : 'Each panel member gets an email with a calendar invitation (.ics) that adds the interview to Outlook or Google Calendar. Sending again updates the existing entry.'}
             </span>
           </div>
         )}
