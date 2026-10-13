@@ -3,51 +3,46 @@
 The app is one Vercel project: the Vite SPA (static) + the Express API as a single
 serverless function (`api/index.mjs`). Routing is handled by `vercel.json`.
 
-> **Why a cloud database?** Vercel functions run in the cloud and cannot reach your
-> local Postgres (`localhost:5432`). You must move the database to a hosted Postgres.
+> **Database: Neon.** Production is the `neondb` database in the Neon project; local
+> development uses a separate `katana_dev` database in the same project (a copy of
+> production taken when the portal moved off Prisma Postgres, 13 Oct 2026).
 
 ---
 
-## 1. Provision a cloud Postgres
+## 1. Connection strings
 
-Pick one (all work — the code only needs a connection string):
-
-| Provider | How | Env var |
+| Where | Variable | Points at |
 |---|---|---|
-| **Vercel Postgres** (recommended) | Vercel dashboard → Storage → Create → Postgres → connect to the project | auto-sets `POSTGRES_URL` |
-| **Neon** | neon.tech → new project → copy the **pooled** connection string | set `DATABASE_URL` |
-| **Supabase** | Project → Settings → Database → **Connection pooling** string (port 6543) | set `DATABASE_URL` |
+| Vercel (Production, Preview) | `DATABASE_URL` (and `POSTGRES_URL`) | Neon `neondb`, **pooled** endpoint (`…-pooler…neon.tech`) |
+| Local `.env` | `DATABASE_URL` | Neon `katana_dev`, pooled |
+| Local `.env` | `PROD_DATABASE_URL` | Neon `neondb`, pooled — used by the `cloud:*` scripts |
 
-Always use the **pooled** connection string (serverless opens many short-lived
+The app always uses the **pooled** endpoint (serverless opens many short-lived
 connections). `db.mjs` reads `DATABASE_URL` first, then `POSTGRES_URL`.
 
-## 2. Load schema + data into the cloud DB
+For `pg_dump` / `pg_restore`, use the **direct** endpoint (the same host without
+`-pooler`). The pooler shares server sessions between clients, so session settings
+those tools make (`search_path = ''`) would leak into the app's connections.
 
-From your machine, point the cloud scripts at the connection string and push
-everything (schema, candidates/scores/comments, accounts, feedback drafts):
+## 2. Schema and data
 
 ```bash
-# Bash:
-export DATABASE_URL='postgres://user:pass@host/db?sslmode=require'
-npm run ingest            # regenerate seed.sql (if needed)
-npm run cloud:push        # schema → seed → accounts → feedback drafts
-```
-```powershell
-# PowerShell:
-$env:DATABASE_URL = 'postgres://user:pass@host/db?sslmode=require'
-npm run ingest
-npm run cloud:push
+npm run db:schema      # apply server/sql/schema.sql to local (katana_dev); re-runnable
+npm run cloud:schema   # … to production
+npm run ingest         # regenerate supabase/seed.sql from scripts/contacts.mjs
+npm run cloud:push     # production: schema → seed → accounts → feedback drafts
 ```
 
-`cloud:push` runs: `cloud:schema` → `cloud:seed` → `db:accounts` → `db:feedback`.
-(Needs `psql` on PATH; you already have it via scoop.)
+These run through Node (`scripts/run-sql.mjs`, `scripts/with-prod.mjs`), so they work
+the same in PowerShell and Bash and don't need `psql`. Note that `cloud:push` also
+(re)creates the default accounts listed in `scripts/seed-accounts.mjs`.
 
 ## 3. Set environment variables in Vercel
 
 Project → Settings → Environment Variables (Production):
 
 ```
-DATABASE_URL   = <pooled connection string>      # skip if using Vercel Postgres (POSTGRES_URL is auto)
+DATABASE_URL   = <Neon pooled connection string, neondb>   # POSTGRES_URL is set to the same
 APP_URL        = https://katana.ninanigroup.com  # your public domain, no trailing slash
 JWT_SECRET     = <run: node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))">
 SMTP_HOST      = smtp.gmail.com
@@ -106,5 +101,5 @@ count). The count is in memory, per function instance.
   or better deliverability later, consider a transactional API (Resend/SendGrid).
 - **Cold starts:** first request after idle is slightly slower while the function and
   DB connection warm up. Normal for serverless.
-- **Local dev is unchanged:** without `DATABASE_URL`/`POSTGRES_URL`, the app still uses
-  your local Postgres and `npm run dev:all`.
+- **Local dev** (`npm run dev:all`) uses the Neon `katana_dev` database from `.env`,
+  so it never touches production data.

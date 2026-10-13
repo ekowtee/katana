@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from 'react'
-import { supabase } from './lib/supabaseClient'
 import logo from './assets/main_logo.png'
 import { toast } from 'react-toastify'
 import { motion, AnimatePresence } from 'framer-motion'
@@ -78,26 +77,27 @@ const App = () => {
       return
     }
 
-    if (!supabase) {
-      toast.error('Registration is temporarily unavailable. Please try again later.')
-      return
-    }
-
     setLoading(true)
     try {
-      const { error } = await supabase
-        .from('registrations')
-        .insert([{
-          full_name: formData.fullName,
+      // Saved by the portal API (server/registrations.mjs).
+      const res = await fetch('/api/registrations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fullName: formData.fullName,
           email: formData.email,
           phone: formData.phone,
-          city: 'N/A',
           organisation: formData.organisation,
           source: formData.source,
           consent: formData.consent
-        }])
-
-      if (error) throw error
+        })
+      })
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        const error = new Error(body.message || 'Registration is temporarily unavailable. Please try again later.')
+        error.code = body.error
+        throw error
+      }
 
       // Send Confirmation Email
       try {
@@ -128,7 +128,7 @@ const App = () => {
       })
       setIsFormOpen(false)
     } catch (error) {
-      if (error.code === '23505') {
+      if (error.code === 'already_registered') {
         toast.error('This email is already registered for the event.')
       } else {
         toast.error(error.message || 'Something went wrong. Please try again.')

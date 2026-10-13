@@ -11,6 +11,7 @@ import { terranovaSso } from './sso.mjs'
 import { assessmentRoutes, recomputeCandidate, rankCohort, myCohorts, mayView } from './assessment.mjs'
 import { cvRoutes } from './cv-ingest.mjs'
 import { settingsRoutes } from './settings-routes.mjs'
+import { registrationRoutes } from './registrations.mjs'
 
 const app = express()
 app.use(express.json())
@@ -56,6 +57,8 @@ app.use(assessmentRoutes())
 // CV upload + AI summaries per cohort, and the SMTP / AI settings behind them.
 app.use(cvRoutes())
 app.use(settingsRoutes())
+// Launch-page RSVPs.
+app.use(registrationRoutes())
 
 app.get('/api/auth/me', async (req, res) => {
   const acc = await currentAccount(req)

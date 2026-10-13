@@ -200,6 +200,21 @@ create table if not exists cv_files (
 );
 create index if not exists cv_files_cohort_idx on cv_files (cohort_slug, created_at);
 
+-- ── Launch-page RSVPs (/launch), saved by POST /api/registrations ───────────
+-- (Previously a Supabase table with the same columns; one RSVP per email.)
+create table if not exists registrations (
+  id            bigserial primary key,
+  full_name     text not null,
+  email         text not null,
+  phone         text,
+  city          text,
+  organisation  text,
+  source        text,
+  consent       boolean not null default false,
+  created_at    timestamptz not null default now()
+);
+create unique index if not exists registrations_email_uniq on registrations (lower(email));
+
 -- ── Integration settings entered in Admin → Settings ('smtp', 'ai') ─────────
 -- Passwords / API keys inside `config` are encrypted (see server/settings.mjs).
 create table if not exists integration_settings (
