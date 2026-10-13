@@ -8,6 +8,8 @@ import {
 } from 'lucide-react'
 import { api } from '../lib/api'
 import { Loader, StatusChip, STATUS_LABEL } from '../components/ui'
+import CohortPicker from '../components/CohortPicker'
+import { cohortLabel, monthLabel } from '../lib/cohorts'
 
 const TABS = [
   { key: 'access', label: 'Access & Invites', icon: Users2 },
@@ -189,18 +191,14 @@ function FeedbackTab({ dash, cohorts, reloadDash, initialSlug, onSelect, flash }
   return (
     <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,260px) minmax(0,1fr)', gap: '1.25rem' }} className="dash-grid">
       <div style={{ gridColumn: '1 / -1', display: 'flex', alignItems: 'flex-end', gap: 12, flexWrap: 'wrap' }}>
-        <div style={{ minWidth: 240 }}>
-          <label>Cohort</label>
-          <select value={cohortFilter} onChange={(e) => {
-            const v = e.target.value
-            setCohortFilter(v)
-            const first = dash.candidates.find((c) => v === '*' || (c.cohort_slug || '') === v)
-            setSlug(first?.slug || ''); onSelect(first?.slug || '')
-          }}>
-            {cohorts.map((co) => <option key={co.slug} value={co.slug}>{co.name}{co.role ? ` — ${co.role}` : ''}</option>)}
-            {dash.candidates.some((c) => !c.cohort_slug) && <option value="">No cohort</option>}
-            <option value="*">All cohorts</option>
-          </select>
+        <div style={{ flex: '1 1 560px', maxWidth: 760, minWidth: 0 }}>
+          <CohortPicker cohorts={cohorts} value={cohortFilter} idPrefix="fb-cohort"
+            extra={[...(dash.candidates.some((c) => !c.cohort_slug) ? [{ value: '', label: 'No cohort' }] : []), { value: '*', label: 'All cohorts' }]}
+            onChange={(v) => {
+              setCohortFilter(v)
+              const first = dash.candidates.find((c) => v === '*' || (c.cohort_slug || '') === v)
+              setSlug(first?.slug || ''); onSelect(first?.slug || '')
+            }} />
         </div>
         <span style={{ fontSize: 11, color: 'var(--color-cream-muted)', paddingBottom: 10 }}>{shown.length} candidate{shown.length === 1 ? '' : 's'}</span>
       </div>
@@ -244,7 +242,7 @@ function FeedbackTab({ dash, cohorts, reloadDash, initialSlug, onSelect, flash }
                 <p style={{ fontSize: 11, color: 'var(--color-cream-muted)', marginTop: 4 }}>Only <strong>approved</strong> sections appear on the candidate’s page. Raw panel notes are never shared.</p>
               </div>
               {candidate && (
-                <div style={{ textAlign: 'right' }}>
+                <div style={{ textAlign: 'right', flex: '0 1 440px', minWidth: 0, display: 'grid', justifyItems: 'end' }}>
                   <label style={{ marginBottom: 4 }}>Decision Status</label>
                   <select
                     value={candidate.status}
@@ -265,10 +263,11 @@ function FeedbackTab({ dash, cohorts, reloadDash, initialSlug, onSelect, flash }
                       await api.admin.updateCandidate(candidate.slug, { cohortSlug: e.target.value })
                       await reloadDash(); flash('Cohort updated')
                     }}
-                    style={{ width: 180 }}
+                    style={{ width: 'min(420px, 100%)' }}
+                    title={cohorts.find((co) => co.slug === candidate.cohort_slug) ? cohortLabel(cohorts.find((co) => co.slug === candidate.cohort_slug)) : ''}
                   >
                     {!candidate.cohort_slug && <option value="">— none —</option>}
-                    {cohorts.map((co) => <option key={co.slug} value={co.slug}>{co.name}</option>)}
+                    {cohorts.map((co) => <option key={co.slug} value={co.slug}>{monthLabel(co.period)} · {cohortLabel(co)}</option>)}
                   </select>
                   <p style={{ fontSize: 9.5, color: 'var(--color-cream-muted)', marginTop: 4, letterSpacing: '0.03em' }}>Sets which questions &amp; weights they’re scored on</p>
                 </div>
@@ -320,12 +319,11 @@ function CohortsTab({ data, reload, reloadDash, flash }) {
   return (
     <div style={{ display: 'grid', gap: '1.25rem' }}>
       <div className="card card-pad" style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'flex-end', justifyContent: 'space-between' }}>
-        <div style={{ minWidth: 220 }}>
-          <label>Cohort</label>
-          <select value={slug} onChange={(e) => { setSlug(e.target.value); setCreating(false) }} style={{ width: '100%' }} disabled={!cohorts.length}>
-            {!cohorts.length && <option value="">No cohorts yet</option>}
-            {cohorts.map((c) => <option key={c.slug} value={c.slug}>{c.name}{c.role ? ` — ${c.role}` : ''} · {c.candidates} candidate{c.candidates === 1 ? '' : 's'}</option>)}
-          </select>
+        <div style={{ flex: '1 1 560px', maxWidth: 760, minWidth: 0 }}>
+          {cohorts.length
+            ? <CohortPicker cohorts={cohorts} value={slug} idPrefix="co-cohort" onChange={(s) => { setSlug(s); setCreating(false) }}
+                describe={(c) => `${cohortLabel(c)} · ${c.candidates} candidate${c.candidates === 1 ? '' : 's'}${c.closed_at ? ' · closed' : ''}`} />
+            : <p style={{ fontSize: 12.5, color: 'var(--color-cream-muted)' }}>No cohorts yet.</p>}
         </div>
         {!creating && <button className="btn-ghost btn-sm" onClick={() => setCreating(true)}><Plus size={13} /> New cohort</button>}
       </div>
@@ -349,28 +347,30 @@ function CohortsTab({ data, reload, reloadDash, flash }) {
 function NewCohort({ cohorts, onCreated, onCancel, flash }) {
   const [name, setName] = useState('')
   const [role, setRole] = useState('')
+  const [period, setPeriod] = useState(() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}` })
   const [copyFrom, setCopyFrom] = useState('')
   const [busy, setBusy] = useState(false)
   const create = async () => {
     if (!name.trim()) return
     setBusy(true)
-    try { const r = await api.admin.createCohort({ name: name.trim(), role: role.trim(), copyFrom: copyFrom || null }); flash('Cohort created'); await onCreated(r.slug) }
+    try { const r = await api.admin.createCohort({ name: name.trim(), role: role.trim(), period, copyFrom: copyFrom || null }); flash('Cohort created'); await onCreated(r.slug) }
     catch { flash('Could not create cohort') } finally { setBusy(false) }
   }
   return (
     <div className="card card-pad">
       <span className="card-title">New cohort</span>
-      <div className="grid grid-cols-1 sm:grid-cols-[1.2fr_1.2fr_1fr_auto_auto] gap-3 items-end" style={{ marginTop: 14 }}>
-        <div><label>Name</label><input type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. January 2027" /></div>
-        <div><label>Role being interviewed for</label><input type="text" value={role} onChange={(e) => setRole(e.target.value)} placeholder="e.g. IT Support Officer" /></div>
+      <div className="grid grid-cols-1 sm:grid-cols-[1.2fr_1.2fr_0.8fr_1fr_auto_auto] gap-3 items-end" style={{ marginTop: 14 }}>
+        <div><label htmlFor="new-cohort-name">Name</label><input id="new-cohort-name" type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. IT Support · Accra intake" /></div>
+        <div><label htmlFor="new-cohort-role">Role being interviewed for</label><input id="new-cohort-role" type="text" value={role} onChange={(e) => setRole(e.target.value)} placeholder="e.g. IT Support Officer" /></div>
+        <div><label htmlFor="new-cohort-month">Interview month</label><input id="new-cohort-month" type="month" value={period} onChange={(e) => setPeriod(e.target.value)} /></div>
         <div>
           <label>Start from</label>
           <select value={copyFrom} onChange={(e) => setCopyFrom(e.target.value)} style={{ width: '100%' }}>
             <option value="">Blank (default weights)</option>
-            {cohorts.map((c) => <option key={c.slug} value={c.slug}>Copy of {c.name}</option>)}
+            {cohorts.map((c) => <option key={c.slug} value={c.slug}>Copy of {monthLabel(c.period)} · {cohortLabel(c)}</option>)}
           </select>
         </div>
-        <button className="btn-gold btn-sm" disabled={busy || !name.trim()} onClick={create}><Check size={14} /> Create</button>
+        <button className="btn-gold btn-sm" disabled={busy || !name.trim() || !/^\d{4}-\d{2}$/.test(period)} onClick={create}><Check size={14} /> Create</button>
         {onCancel && <button className="btn-ghost btn-sm" onClick={onCancel}>Cancel</button>}
       </div>
     </div>
@@ -380,16 +380,17 @@ function NewCohort({ cohorts, onCreated, onCancel, flash }) {
 function CohortSettings({ cohort, criteria, reload, flash }) {
   const [name, setName] = useState(cohort.name)
   const [role, setRole] = useState(cohort.role || '')
+  const [period, setPeriod] = useState(cohort.period || '')
   const [weights, setWeights] = useState(() => Object.fromEntries(criteria.map((c) => [c.key, String(cohort.weights[c.key] ?? c.weight)])))
   const [busy, setBusy] = useState(false)
   const total = criteria.reduce((s, c) => s + (Number(weights[c.key]) || 0), 0)
-  const changed = name.trim() !== cohort.name || role.trim() !== (cohort.role || '') || criteria.some((c) => Number(weights[c.key]) !== Number(cohort.weights[c.key] ?? c.weight))
-  const valid = name.trim() && criteria.every((c) => weights[c.key] !== '' && Number(weights[c.key]) >= 0 && Number(weights[c.key]) <= 100) && total > 0
+  const changed = name.trim() !== cohort.name || role.trim() !== (cohort.role || '') || period !== (cohort.period || '') || criteria.some((c) => Number(weights[c.key]) !== Number(cohort.weights[c.key] ?? c.weight))
+  const valid = name.trim() && /^\d{4}-\d{2}$/.test(period) && criteria.every((c) => weights[c.key] !== '' && Number(weights[c.key]) >= 0 && Number(weights[c.key]) <= 100) && total > 0
 
   const save = async () => {
     setBusy(true)
     try {
-      await api.admin.updateCohort(cohort.slug, { name: name.trim(), role: role.trim(), weights: Object.fromEntries(criteria.map((c) => [c.key, Number(weights[c.key])])) })
+      await api.admin.updateCohort(cohort.slug, { name: name.trim(), role: role.trim(), period, weights: Object.fromEntries(criteria.map((c) => [c.key, Number(weights[c.key])])) })
       await reload(); flash('Cohort saved')
     } catch { flash('Could not save cohort') } finally { setBusy(false) }
   }
@@ -398,11 +399,12 @@ function CohortSettings({ cohort, criteria, reload, flash }) {
     <div className="card card-pad">
       <span className="card-title"><Target size={13} style={{ verticalAlign: '-2px', marginRight: 6 }} />Cohort, role &amp; weights</span>
       <p style={{ fontSize: 12, color: 'var(--color-cream-muted)', margin: '8px 0 14px', lineHeight: 1.6 }}>
-        The role shapes the AI’s CV summaries. Weights are the points each dimension is worth in a candidate’s total; changing them rescores everyone in this cohort.
+        The role shapes the AI’s CV summaries; the interview month groups the cohort on the dashboard and in every cohort list. Weights are the points each dimension is worth in a candidate’s total; changing them rescores everyone in this cohort.
       </p>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3" style={{ marginBottom: 12 }}>
-        <div><label>Cohort name</label><input type="text" value={name} onChange={(e) => setName(e.target.value)} /></div>
-        <div><label>Role being interviewed for</label><input type="text" value={role} onChange={(e) => setRole(e.target.value)} placeholder="e.g. IT Support Officer" /></div>
+      <div className="grid grid-cols-1 sm:grid-cols-[1.4fr_1.4fr_0.8fr] gap-3" style={{ marginBottom: 12 }}>
+        <div><label htmlFor={`co-name-${cohort.slug}`}>Cohort name</label><input id={`co-name-${cohort.slug}`} type="text" value={name} onChange={(e) => setName(e.target.value)} /></div>
+        <div><label htmlFor={`co-role-${cohort.slug}`}>Role being interviewed for</label><input id={`co-role-${cohort.slug}`} type="text" value={role} onChange={(e) => setRole(e.target.value)} placeholder="e.g. IT Support Officer" /></div>
+        <div><label htmlFor={`co-month-${cohort.slug}`}>Interview month</label><input id={`co-month-${cohort.slug}`} type="month" className={period ? '' : 'empty-picker'} value={period} onChange={(e) => setPeriod(e.target.value)} /></div>
       </div>
       <div className="grid grid-cols-2 sm:grid-cols-[repeat(4,1fr)_auto] gap-3 items-end">
         {criteria.map((c) => (

@@ -48,6 +48,7 @@ If you get no email, the address isn't on the system yet. Administrators add sta
 
 - **Name** — e.g. *October 2026*.
 - **Role being interviewed for** — e.g. *IT Support Officer*. It appears everywhere the cohort does, and the AI writes each CV summary against it.
+- **Interview month** — the month the cohort interviews in. Every cohort list (Dashboard, Candidate Feedback, Cohorts) is filtered **by month first, then by cohort**, so give each cohort a descriptive name (e.g. *IT Support · Accra intake*) rather than just the month.
 - **Start from** — blank, or a copy of an earlier cohort (its weights and questions come across).
 
 Then, in the cohort's cards:
@@ -125,7 +126,7 @@ Add administrators and panel members by email and name. The link icon copies a s
 
 Accept the **calendar invitation** emailed to you: it holds the time, venue and a link to the candidate's file.
 
-Open the **Dashboard**. You see only the cohorts whose panel you're on; switch between them at the top right. Click a candidate to open their file:
+Open the **Dashboard**. You see only the cohorts whose panel you're on; switch between them at the top right by choosing the **month**, then the **cohort**. Click a candidate to open their file:
 
 - **CV Summary** — the panel's read of their CV: experience, education, strengths and **points to probe**. Candidates never see the points to probe. **View CV** opens the original PDF.
 - **Your Assessment** — the questions you'll score, by dimension. Under a question, **What a strong answer shows** gives the scoring guidance (for imported RiteVizor questions, the band anchor for the role).

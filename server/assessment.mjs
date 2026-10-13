@@ -79,9 +79,12 @@ const slugify = (s) =>
 // ── Interview panels: who may see and score each cohort ─────────────────────
 // The cohorts this staff member is on the panel for, newest first.
 export const myCohorts = (accountId) => many(
-  `select co.slug, co.name, co.role, co.created_at, co.closed_at, co.interview_location
+  `select co.slug, co.name, co.role, co.created_at, co.closed_at, co.interview_location, to_char(co.period, 'YYYY-MM') as period
      from cohort_panel p join cohorts co on co.slug = p.cohort_slug
-    where p.account_id = $1 order by co.created_at desc, co.name`, [accountId])
+    where p.account_id = $1 order by co.period desc nulls last, co.created_at desc, co.name`, [accountId])
+
+// 'YYYY-MM' from the browser → first-of-month date, or null if malformed.
+const periodOf = (v) => (typeof v === 'string' && /^\d{4}-(0[1-9]|1[0-2])$/.test(v.trim()) ? `${v.trim()}-01` : null)
 
 // Once a cohort is closed its scores are final.
 export const isClosed = async (cohortSlug) =>
@@ -125,7 +128,7 @@ export function assessmentRoutes() {
   r.get('/api/admin/cohorts', admin, async (req, res) => {
     const criteria = await many(`select key, label, weight, sort_order from criteria order by sort_order`)
     const cohorts = await many(`
-      select co.slug, co.name, co.role, co.created_at, co.closed_at, co.interview_location,
+      select co.slug, co.name, co.role, co.created_at, co.closed_at, co.interview_location, to_char(co.period, 'YYYY-MM') as period,
              (select count(*)::int from candidates c where c.cohort_slug = co.slug) as candidates,
              (select count(*)::int from candidates c where c.cohort_slug = co.slug and c.interview_at is not null) as scheduled,
              (select count(*)::int from candidates c where c.cohort_slug = co.slug and c.status in ('review', 'discuss')) as undecided,
@@ -133,7 +136,7 @@ export function assessmentRoutes() {
              (select count(*)::int from cohort_panel p where p.cohort_slug = co.slug) as panel,
              coalesce((select json_object_agg(cc.criterion_key, cc.weight)
                          from cohort_criteria cc where cc.cohort_slug = co.slug), '{}') as weights
-        from cohorts co order by co.created_at desc`)
+        from cohorts co order by co.period desc nulls last, co.created_at desc, co.name`)
     res.json({ criteria, cohorts, scale: SCALE })
   })
 
@@ -145,7 +148,8 @@ export function assessmentRoutes() {
     const copyFrom = req.body?.copyFrom || null
     let slug = slugify(name)
     if (await one(`select 1 from cohorts where slug = $1`, [slug])) slug = `${slug}-${crypto.randomBytes(2).toString('hex')}`
-    await query(`insert into cohorts (slug, name, role) values ($1, $2, $3)`, [slug, name, role])
+    // Interview month: as given, else this month.
+    await query(`insert into cohorts (slug, name, role, period) values ($1, $2, $3, coalesce($4::date, date_trunc('month', now())::date))`, [slug, name, role, periodOf(req.body?.period)])
     // Whoever creates it starts on its panel; the admin adjusts the rest.
     await query(`insert into cohort_panel (cohort_slug, account_id) values ($1, $2)`, [slug, req.account.id])
     if (copyFrom && (await one(`select 1 from cohorts where slug = $1`, [copyFrom]))) {
@@ -172,6 +176,11 @@ export function assessmentRoutes() {
     if (!(await one(`select 1 from cohorts where slug = $1`, [slug]))) return res.status(404).json({ error: 'not_found' })
     const name = typeof req.body?.name === 'string' ? req.body.name.trim() : ''
     if (name) await query(`update cohorts set name = $2 where slug = $1`, [slug, name])
+    if (req.body?.period !== undefined) {
+      const p = periodOf(req.body.period)
+      if (!p) return res.status(400).json({ error: 'bad_period', message: 'Choose the month the cohort interviews in.' })
+      await query(`update cohorts set period = $2 where slug = $1`, [slug, p])
+    }
     if (typeof req.body?.role === 'string') await query(`update cohorts set role = $2 where slug = $1`, [slug, req.body.role.trim() || null])
     const weights = req.body?.weights
     if (weights && typeof weights === 'object') {

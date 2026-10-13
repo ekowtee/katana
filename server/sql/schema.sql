@@ -143,6 +143,10 @@ alter table cohorts add column if not exists interview_location text;
 -- their outcome, feedback and CV summary. Reopening clears these.
 alter table cohorts add column if not exists closed_at timestamptz;
 alter table cohorts add column if not exists closed_by uuid references accounts(id) on delete set null;
+-- The month the cohort interviews in (first of the month): dashboards and
+-- pickers filter by month, then cohort. Backfilled from the earliest
+-- interview slot, else the creation date (run after candidates.interview_at exists).
+alter table cohorts add column if not exists period date;
 
 -- Interview slot per candidate, sent to the panel (and optionally the
 -- candidate) as a calendar invitation. interview_sequence is the iCalendar
@@ -275,3 +279,11 @@ create trigger candidates_touch before update on candidates
 drop trigger if exists feedback_touch on candidate_feedback;
 create trigger feedback_touch before update on candidate_feedback
   for each row execute function touch_updated_at();
+
+
+-- ── Backfills (last, so every column they read exists) ──────────────────────
+-- A cohort without an interview month takes it from its earliest interview
+-- slot, else from when it was created.
+update cohorts co set period = date_trunc('month', coalesce(
+    (select min(c.interview_at) from candidates c where c.cohort_slug = co.slug), co.created_at))::date
+ where co.period is null;

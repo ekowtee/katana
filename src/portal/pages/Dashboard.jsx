@@ -8,6 +8,8 @@ import { Users, BarChart3, CheckCircle2, Gauge } from 'lucide-react'
 import { api } from '../lib/api'
 import { StatusChip, Loader, fmtPct, critShort, STATUS_LABEL } from '../components/ui'
 import { useAuth } from '../lib/AuthContext'
+import CohortPicker from '../components/CohortPicker'
+import { monthLabel } from '../lib/cohorts'
 
 const STATUS_ORDER = ['selected', 'discuss', 'reserve', 'not_selected', 'not_assessed', 'review']
 const STATUS_COLOR = {
@@ -76,7 +78,7 @@ export default function Dashboard() {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 16, flexWrap: 'wrap' }}>
         <div>
           <p className="portal-eyebrow">
-            {cohort.name}{cohort.role ? ` · ${cohort.role}` : ''}
+            {cohort.period ? `${monthLabel(cohort.period)} · ` : ''}{cohort.name}{cohort.role ? ` · ${cohort.role}` : ''}
             {cohort.closed_at
               ? <span className="chip chip-selected" style={{ marginLeft: 10, verticalAlign: '1px' }}><span className="dot" />Closed · results released</span>
               : <span className="chip chip-review" style={{ marginLeft: 10, verticalAlign: '1px' }}><span className="dot" />Interviewing</span>}
@@ -84,11 +86,8 @@ export default function Dashboard() {
           <h1 className="portal-h1">Selection <span className="accent">Dashboard</span></h1>
         </div>
         {cohorts.length > 1 && (
-          <div style={{ minWidth: 220 }}>
-            <label>Cohort</label>
-            <select value={cohort.slug} onChange={(e) => setParams({ cohort: e.target.value })}>
-              {cohorts.map((c) => <option key={c.slug} value={c.slug}>{c.name}{c.role ? ` — ${c.role}` : ''}</option>)}
-            </select>
+          <div style={{ flex: '1 1 520px', maxWidth: 640, minWidth: 0 }}>
+            <CohortPicker cohorts={cohorts} value={cohort.slug} onChange={(s) => setParams({ cohort: s })} idPrefix="dash-cohort" />
           </div>
         )}
       </div>
